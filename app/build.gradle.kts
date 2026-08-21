@@ -23,9 +23,9 @@ android {
         if (hasReleaseKey) {
             create("release") {
                 storeFile = releaseStoreFile
-                storePassword = providers.environmentVariable("RELEASE_STORE_PASSWORD").getOrElse("DocuScanBuild2026")
+                storePassword = providers.environmentVariable("RELEASE_STORE_PASSWORD").orNull?.takeIf { it.isNotBlank() } ?: "DocuScanBuild2026"
                 keyAlias = "docuscan"
-                keyPassword = providers.environmentVariable("RELEASE_KEY_PASSWORD").getOrElse("DocuScanBuild2026")
+                keyPassword = providers.environmentVariable("RELEASE_KEY_PASSWORD").orNull?.takeIf { it.isNotBlank() } ?: "DocuScanBuild2026"
             }
         }
     }
