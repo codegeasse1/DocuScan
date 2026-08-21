@@ -24,7 +24,7 @@ class MainActivity : ComponentActivity() {
         if (A11y.active) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN -> {
-                    if (event.action == KeyEvent.ACTION_DOWN && !event.isRepeatCount) {
+                    if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
                         A11y.captureHandler?.invoke()
                     }
                     return true

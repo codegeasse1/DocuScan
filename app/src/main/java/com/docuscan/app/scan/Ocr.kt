@@ -181,7 +181,7 @@ object Ocr {
                     if (!api.init(data.parentFile?.absolutePath, lang)) return null
                     api.setPageSegMode(TessBaseAPI.PageSegMode.PSM_SINGLE_WORD)
                     api.setImage(scaled)
-                    val text = api.utf8Text?.trim()
+                    val text = api.getUTF8Text()?.trim()
                     text?.takeIf { it.isNotEmpty() && it.any { c -> c.isLetterOrDigit() } }
                 } finally {
                     api.recycle()

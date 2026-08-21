@@ -21,7 +21,7 @@ object Dictionary {
         try {
             context.assets.open("words/en_50k.txt").bufferedReader().use { br ->
                 var count = 0
-                for (line in br) {
+                for (line in br.lineSequence()) {
                     if (count >= MAX_WORDS) break
                     val w = line.substringBefore('\t').substringBefore(' ').trim()
                     if (w.length in 2..30 && w.all { it.isLetter() }) {

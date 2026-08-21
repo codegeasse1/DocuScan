@@ -133,7 +133,7 @@ fun OcrScreen(vm: DocViewModel, pageId: Long, snackbar: SnackbarHostState, onBac
                             onClick = {
                                 langMenu = false
                                 if (lang != vm.settings.ocrLang) {
-                                    snackbar.showSnackbar("Recognizing with '$lang'…")
+                                    scope.launch { snackbar.showSnackbar("Recognizing with '$lang'…") }
                                     vm.setOcrLang(lang)
                                 }
                             }

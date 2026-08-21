@@ -75,7 +75,7 @@ fun SettingsScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
             } catch (e: Exception) {
             }
             vm.updateSettings(vm.settings.copy(inboxUri = uri.toString(), inboxEnabled = true))
-            snackbar.showSnackbar("Inbox folder set")
+            scope.launch { snackbar.showSnackbar("Inbox folder set") }
         }
     }
 
