@@ -67,9 +67,6 @@ android {
             pickFirsts += setOf(
                 "**/libjpeg.so",
                 "**/libpng.so",
-                "**/liblept.so",
-                "**/libtesseract.so",
-                "**/libtess4a.so",
                 "**/libc++_shared.so"
             )
         }
@@ -91,9 +88,7 @@ dependencies {
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
-    implementation(libs.tesseract4android)
     implementation(libs.androidx.documentfile)
     implementation(libs.opencv)
-    implementation(libs.onnxruntime)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

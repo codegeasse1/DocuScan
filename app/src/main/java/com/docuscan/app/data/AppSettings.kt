@@ -6,7 +6,6 @@ data class AppSettings(
     val defaultFilter: String = "original",
     val format: String = "both",
     val theme: String = "system",
-    val ocrLang: String = "eng",
     val inboxEnabled: Boolean = false,
     val inboxUri: String = "",
     val accessibilityEnabled: Boolean = false,
@@ -20,7 +19,6 @@ data class AppSettings(
             .putString("defaultFilter", defaultFilter)
             .putString("format", format)
             .putString("theme", theme)
-            .putString("ocrLang", ocrLang)
             .putBoolean("inboxEnabled", inboxEnabled)
             .putString("inboxUri", inboxUri)
             .putBoolean("accessibilityEnabled", accessibilityEnabled)
@@ -38,7 +36,6 @@ data class AppSettings(
                 p.getString("defaultFilter", "original") ?: "original",
                 p.getString("format", "both") ?: "both",
                 p.getString("theme", "system") ?: "system",
-                p.getString("ocrLang", "eng") ?: "eng",
                 p.getBoolean("inboxEnabled", false),
                 p.getString("inboxUri", "") ?: "",
                 p.getBoolean("accessibilityEnabled", false),

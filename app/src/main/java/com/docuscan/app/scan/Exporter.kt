@@ -15,8 +15,7 @@ object Exporter {
     data class Result(
         val pdfUri: Uri?,
         val jpgUris: List<Uri>,
-        val shareFile: File?,
-        val txtUri: Uri? = null
+        val shareFile: File?
     )
 
     fun run(context: Context, vm: DocViewModel, format: String): Result {
@@ -24,7 +23,6 @@ object Exporter {
         val filteredPages = vm.pages.map {
             applyFilter(it.bitmap, it.filterId, it.brightness, it.contrast)
         }
-        val ocrTexts = vm.pages.map { it.ocrText }
         val pageFormat = PageFormat.fromName(settings.pageFormat, PageFormat.FIT_TO_IMAGE)
         val quality = PdfQualityPreset.fromName(settings.pdfQuality, PdfQualityPreset.STANDARD)
         val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
@@ -32,25 +30,11 @@ object Exporter {
 
         var pdfUri: Uri? = null
         var shareFile: File? = null
-        var txtUri: Uri? = null
         val jpgUris = mutableListOf<Uri>()
-
-        if (format == "txt") {
-            val combined = ocrTexts.filterNotNull().filter { it.isNotBlank() }
-            if (combined.isNotEmpty()) {
-                val text = combined.joinToString("\n\n")
-                val f = File(context.cacheDir, "$base.txt")
-                f.writeText(text)
-                shareFile = f
-                txtUri = MediaSaver.saveTxt(context, text, "$base.txt")
-            }
-            vm.addHistory("$base", filteredPages.size, format, null, emptyList(), combined.joinToString("\n"))
-            return Result(null, emptyList(), shareFile, txtUri)
-        }
 
         if (format == "both" || format == "pdf") {
             val f = File(context.cacheDir, "$base.pdf")
-            f.outputStream().use { PdfExporter.createPdf(filteredPages, it, ocrTexts, pageFormat, quality) }
+            f.outputStream().use { PdfExporter.createPdf(filteredPages, it, pageFormat, quality) }
             shareFile = f
             pdfUri = MediaSaver.savePdf(context, f, "$base.pdf")
         }
@@ -86,8 +70,7 @@ object Exporter {
             }
         }
 
-        val searchText = ocrTexts.filterNotNull().filter { it.isNotBlank() }.joinToString("\n")
-        vm.addHistory("$base", filteredPages.size, format, pdfUri, jpgUris, searchText)
+        vm.addHistory("$base", filteredPages.size, format, pdfUri, jpgUris)
         return Result(pdfUri, jpgUris, shareFile)
     }
 
@@ -97,13 +80,11 @@ object Exporter {
             val filteredPages = vm.pages.map {
                 applyFilter(it.bitmap, it.filterId, it.brightness, it.contrast)
             }
-            val ocrTexts = vm.pages.map { it.ocrText }
             val f = File(context.cacheDir, "share_${System.currentTimeMillis()}.pdf")
             f.outputStream().use {
                 PdfExporter.createPdf(
                     filteredPages,
                     it,
-                    ocrTexts,
                     PageFormat.fromName(vm.settings.pageFormat, PageFormat.FIT_TO_IMAGE),
                     PdfQualityPreset.fromName(vm.settings.pdfQuality, PdfQualityPreset.STANDARD)
                 )

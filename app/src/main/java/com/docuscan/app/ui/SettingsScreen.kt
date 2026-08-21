@@ -37,31 +37,13 @@ import com.docuscan.app.BuildConfig
 import com.docuscan.app.DocViewModel
 import com.docuscan.app.data.AppSettings
 import com.docuscan.app.scan.FILTERS
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @Composable
 fun SettingsScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
     val s = vm.settings
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-
-    val langLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            scope.launch {
-                val code = withContext(Dispatchers.IO) { vm.importOcrLang(uri) }
-                if (code != null) {
-                    vm.updateSettings(vm.settings.copy(ocrLang = code))
-                    snackbar.showSnackbar("Imported OCR language '$code'")
-                } else {
-                    snackbar.showSnackbar("Couldn't import that language pack")
-                }
-            }
-        }
-    }
 
     val inboxLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -190,29 +172,6 @@ fun SettingsScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
         }
 
         HorizontalDivider(Modifier.padding(vertical = 12.dp))
-        SectionTitle("OCR language")
-        Text(
-            "OCR runs fully offline on-device. Import .traineddata language packs (e.g. from tessdata_fast) for more languages.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.height(8.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(vm.ocrLangs) { lang ->
-                FilterChip(
-                    selected = s.ocrLang == lang,
-                    onClick = { vm.updateSettings(s.copy(ocrLang = lang)) },
-                    label = { Text(lang) }
-                )
-            }
-            item {
-                OutlinedButton(onClick = { langLauncher.launch(arrayOf("*/*")) }) {
-                    Text("Import pack")
-                }
-            }
-        }
-
-        HorizontalDivider(Modifier.padding(vertical = 12.dp))
         SectionTitle("Inbox Mode")
         Row(
             Modifier.fillMaxWidth(),
@@ -297,7 +256,7 @@ fun SettingsScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
             Text(BuildConfig.VERSION_NAME, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text(
-            "DocuScan is a local-first document scanner: all scanning, OCR, filtering and export happens on your device. " +
+            "DocuScan is a local-first document scanner: all scanning, filtering and export happens on your device. " +
                 "Your documents stay yours.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant

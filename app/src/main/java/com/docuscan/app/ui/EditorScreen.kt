@@ -63,7 +63,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.docuscan.app.DocViewModel
-import com.docuscan.app.scan.AutoCrop
 import com.docuscan.app.scan.BitmapUtil
 import com.docuscan.app.scan.Exporter
 import com.docuscan.app.scan.FILTERS
@@ -80,14 +79,12 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
     val page = vm.pages.getOrNull(vm.selectedPage)
 
     var cropMode by remember { mutableStateOf(false) }
-    var ocrMode by remember { mutableStateOf(false) }
     var showAdjust by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
     var saveMenu by remember { mutableStateOf(false) }
     var jpgOptions by remember { mutableStateOf(false) }
     var addDialog by remember { mutableStateOf(false) }
     var discardDialog by remember { mutableStateOf(false) }
-    var autoCropping by remember { mutableStateOf(false) }
 
     val galleryLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -124,14 +121,13 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
             exporting = false
             val where = when (format) {
                 "jpg" -> "Pictures/DocuScan"
-                "txt" -> "Download/DocuScan"
                 else -> "Download/DocuScan"
             }
             val what = when (format) {
                 "both" -> "PDF + JPGs"
                 "pdf" -> "PDF"
                 "jpg" -> "JPGs"
-                else -> "Text"
+                else -> "Document"
             }
             val inbox = if (vm.settings.inboxEnabled) " + inbox" else ""
             snackbar.showSnackbar("Saved $what to $where$inbox")
@@ -147,21 +143,6 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
         }
     }
 
-    fun autoCrop() {
-        if (autoCropping) return
-        autoCropping = true
-        scope.launch {
-            val pts = withContext(Dispatchers.IO) { AutoCrop.detectCorners(page.bitmap) }
-            autoCropping = false
-            if (pts != null) {
-                vm.replaceSelected(BitmapUtil.perspectiveWarp(page.bitmap, pts))
-                snackbar.showSnackbar("Auto-cropped to the detected page")
-            } else {
-                snackbar.showSnackbar("Couldn't find a page — use Crop")
-            }
-        }
-    }
-
     if (cropMode) {
         CropOverlay(
             bitmap = page.bitmap,
@@ -171,11 +152,6 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
             },
             onCancel = { cropMode = false }
         )
-        return
-    }
-
-    if (ocrMode) {
-        OcrScreen(vm, page.id, snackbar, onBack = { ocrMode = false })
         return
     }
 
@@ -234,10 +210,6 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
         )
     }
 
-    if (autoCropping) {
-        LoadingOverlay("Detecting page corners…")
-    }
-
     if (exporting) {
         LoadingOverlay("Exporting…")
     }
@@ -280,11 +252,7 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
                         text = { Text("Save JPG (options…)") },
                         onClick = { saveMenu = false; jpgOptions = true }
                     )
-                    DropdownMenuItem(
-                        text = { Text("Save as text (TXT)") },
-                        enabled = vm.pages.any { !it.ocrText.isNullOrBlank() },
-                        onClick = { saveMenu = false; doExport("txt") }
-                    )
+                    DropdownMenuItem(text = { Text("Save JPG (options…)") }, onClick = { saveMenu = false; jpgOptions = true })
                 }
             }
         }
@@ -321,8 +289,6 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
                 contentColor = MaterialTheme.colorScheme.inverseOnSurface
             ) {
                 Row(Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
-                    ActionButton("OCR", AppIcons.Ocr) { ocrMode = true }
-                    ActionButton("AutoCrop", AppIcons.Crop) { autoCrop() }
                     ActionButton("Crop", AppIcons.Crop) { cropMode = true }
                     ActionButton("Rotate", Icons.Default.Refresh) { vm.rotateSelected() }
                     ActionButton("Delete", Icons.Default.Delete) { vm.removePage(vm.selectedPage) }

@@ -88,7 +88,7 @@ fun DocumentsScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
             onValueChange = { query = it },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
-            placeholder = { Text("Search titles and OCR text…") }
+            placeholder = { Text("Search titles…") }
         )
         Spacer(Modifier.height(12.dp))
         if (docs.isEmpty()) {
