@@ -58,6 +58,16 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        jniLibs {
+            pickFirsts += setOf(
+                "**/libjpeg.so",
+                "**/libpng.so",
+                "**/liblept.so",
+                "**/libtesseract.so",
+                "**/libtess4a.so",
+                "**/libc++_shared.so"
+            )
+        }
     }
 }
 
