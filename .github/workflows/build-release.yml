@@ -72,7 +72,7 @@ jobs:
           RELEASE_KEY_PASSWORD: "${{ secrets.RELEASE_KEY_PASSWORD }}"
         run: |
           set -o pipefail
-          ./gradlew :app:assembleRelease --stacktrace 2>&1 | tee /tmp/gradle.log
+          ./gradlew :app:assembleRelease --stacktrace --console=plain 2>&1 | tee /tmp/gradle.log
 
       - name: Report build failure as issue
         if: failure()
@@ -83,7 +83,9 @@ jobs:
             echo "Run: ${{ github.run_number }} — commit ${{ github.sha }}"
             echo ""
             echo '```'
-            tail -c 12000 /tmp/gradle.log | tr '\r' '\n' | grep -vE '^[[:space:]]*$' | tail -n 160
+            grep -E '^e: ' /tmp/gradle.log | tail -n 60
+            echo ""
+            grep -E 'error:|What went wrong:|FAILURE:|Caused by:' /tmp/gradle.log | tail -n 12
             echo '```'
           } > /tmp/issue.md
           python3 - <<'EOF'
