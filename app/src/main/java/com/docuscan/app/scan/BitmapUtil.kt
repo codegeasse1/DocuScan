@@ -83,7 +83,13 @@ object BitmapUtil {
             ins.use { i -> tmp.outputStream().use { o -> i.copyTo(o) } }
             val bmp = decodeFile(tmp.absolutePath, maxDim) ?: return null
             val orientation = try {
-                ExifInterface(tmp.absolutePath).rotationDegrees
+                val ei = ExifInterface(tmp.absolutePath)
+                when (ei.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+                    ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                    ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                    ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                    else -> 0
+                }
             } catch (e: Exception) {
                 0
             }

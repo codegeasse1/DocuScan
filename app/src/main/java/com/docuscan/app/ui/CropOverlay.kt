@@ -40,21 +40,21 @@ import kotlin.math.abs
 
 @Composable
 fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit) {
-    var size by remember { mutableStateOf(IntSize.Zero) }
-    val fit = remember(size) {
-        if (size.width == 0 || size.height == 0) {
+    var boxSize by remember { mutableStateOf(IntSize.Zero) }
+    val fit = remember(boxSize) {
+        if (boxSize.width == 0 || boxSize.height == 0) {
             Rect(0f, 0f, 1f, 1f)
         } else {
             val bw = bitmap.width.toFloat()
             val bh = bitmap.height.toFloat()
-            val s = minOf(size.width / bw, size.height / bh)
+            val s = minOf(boxSize.width / bw, boxSize.height / bh)
             val w = bw * s
             val h = bh * s
             Rect(
-                (size.width - w) / 2f,
-                (size.height - h) / 2f,
-                (size.width + w) / 2f,
-                (size.height + h) / 2f
+                (boxSize.width - w) / 2f,
+                (boxSize.height - h) / 2f,
+                (boxSize.width + w) / 2f,
+                (boxSize.height + h) / 2f
             )
         }
     }
@@ -75,12 +75,12 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
         Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .onSizeChanged { size = it }
+            .onSizeChanged { boxSize = it }
     ) {
         Canvas(
             Modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
+                .pointerInput(boxSize) {
                     detectDragGestures(
                         onDragStart = { pos ->
                             var best = -1

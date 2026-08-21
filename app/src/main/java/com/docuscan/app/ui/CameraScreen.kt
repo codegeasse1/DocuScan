@@ -2,6 +2,7 @@ package com.docuscan.app.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -9,10 +10,10 @@ import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
-import androidx.camera.core.toBitmap
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +39,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +51,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.docuscan.app.DocViewModel
 import com.docuscan.app.scan.BitmapUtil
+import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 
 @Composable
@@ -100,6 +103,7 @@ fun CameraScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
 
     val executor = remember { Executors.newSingleThreadExecutor() }
     val mainExecutor = remember { ContextCompat.getMainExecutor(context) }
+    val scope = rememberCoroutineScope()
     val imageCapture = remember { ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).build() }
 
     var lensFacing by remember { mutableIntStateOf(CameraSelector.LENS_FACING_BACK) }
@@ -120,7 +124,7 @@ fun CameraScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
                 provider.bindToLifecycle(lifecycleOwner, selector, preview, imageCapture)
                 providerRef.value = provider
             } catch (e: Exception) {
-                snackbar.showSnackbar("Camera error: ${e.message}")
+                scope.launch { snackbar.showSnackbar("Camera error: ${e.message}") }
             }
         }, ContextCompat.getMainExecutor(context))
     }
@@ -131,20 +135,30 @@ fun CameraScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
         imageCapture.flashMode = if (flashOn) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF
         imageCapture.takePicture(executor, object : ImageCapture.OnImageCapturedCallback() {
             override fun onCaptureSuccess(image: ImageProxy) {
-                val bmp = image.toBitmap()
+                val buffer = image.planes[0].buffer
+                val bytes = ByteArray(buffer.remaining())
+                buffer.get(bytes)
                 val rot = image.imageInfo.rotationDegrees
                 image.close()
-                val rotated = if (rot != 0) BitmapUtil.rotate(bmp, rot) else bmp
-                mainExecutor.execute {
-                    capturing = false
-                    vm.addBitmap(rotated)
+                val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                val rotated = if (decoded != null && rot != 0) BitmapUtil.rotate(decoded, rot) else decoded
+                if (rotated != null) {
+                    mainExecutor.execute {
+                        capturing = false
+                        vm.addBitmap(rotated)
+                    }
+                } else {
+                    mainExecutor.execute {
+                        capturing = false
+                        scope.launch { snackbar.showSnackbar("Capture failed") }
+                    }
                 }
             }
 
             override fun onError(exception: ImageCaptureException) {
                 mainExecutor.execute {
                     capturing = false
-                    snackbar.showSnackbar("Capture failed")
+                    scope.launch { snackbar.showSnackbar("Capture failed") }
                 }
             }
         })
@@ -239,5 +253,5 @@ private fun PillButton(label: String, onClick: () -> Unit) {
 }
 
 private fun Modifier.clickableCapture(onClick: () -> Unit): Modifier = this.then(
-    androidx.compose.foundation.clickable(onClick = onClick)
+    clickable(onClick = onClick)
 )

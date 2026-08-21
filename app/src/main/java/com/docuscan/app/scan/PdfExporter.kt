@@ -1,7 +1,7 @@
 package com.docuscan.app.scan
 
 import android.graphics.Bitmap
-import android.graphics.PdfDocument
+import android.graphics.pdf.PdfDocument
 import android.graphics.RectF
 import java.io.OutputStream
 

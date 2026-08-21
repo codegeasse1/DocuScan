@@ -1,5 +1,6 @@
 package com.docuscan.app.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -39,6 +40,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,10 +56,12 @@ import androidx.compose.ui.platform.LocalContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 @Composable
 fun DocumentsScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { vm.refreshDocs() }
 
     var viewing by remember { mutableStateOf<DocRecord?>(null) }
@@ -90,7 +94,7 @@ fun DocumentsScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
                         onClick = { viewing = doc },
                         onDelete = {
                             vm.deleteDoc(doc.id)
-                            snackbar.showSnackbar("Document deleted")
+                            scope.launch { snackbar.showSnackbar("Document deleted") }
                         }
                     )
                 }
@@ -111,7 +115,7 @@ fun DocumentsScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
             onDelete = {
                 viewing = null
                 vm.deleteDoc(doc.id)
-                snackbar.showSnackbar("Document deleted")
+                scope.launch { snackbar.showSnackbar("Document deleted") }
             },
             onOpenPdf = {
                 doc.pdfUri?.let { ShareUtil.openUri(context, android.net.Uri.parse(it), "application/pdf") }
@@ -120,6 +124,7 @@ fun DocumentsScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DocCard(doc: DocRecord, onClick: () -> Unit, onDelete: () -> Unit) {
     var menu by remember { mutableStateOf(false) }

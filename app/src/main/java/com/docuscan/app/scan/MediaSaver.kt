@@ -21,7 +21,7 @@ object MediaSaver {
             }
             val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                 ?: return null
-            try {
+            return try {
                 val os = context.contentResolver.openOutputStream(uri) ?: return null
                 os.use { bmp.compress(Bitmap.CompressFormat.JPEG, 92, it) }
                 context.contentResolver.update(
@@ -38,12 +38,12 @@ object MediaSaver {
             val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES) ?: context.filesDir, "DocuScan")
             dir.mkdirs()
             val f = File(dir, name)
-            try {
+            return try {
                 f.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+                Uri.fromFile(f)
             } catch (e: Exception) {
-                return null
+                null
             }
-            Uri.fromFile(f)
         }
     }
 
@@ -57,7 +57,7 @@ object MediaSaver {
             }
             val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                 ?: return null
-            try {
+            return try {
                 val os = context.contentResolver.openOutputStream(uri) ?: return null
                 os.use { o -> src.inputStream().use { it.copyTo(o) } }
                 context.contentResolver.update(
@@ -74,12 +74,12 @@ object MediaSaver {
             val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: context.filesDir, "DocuScan")
             dir.mkdirs()
             val f = File(dir, name)
-            try {
+            return try {
                 src.copyTo(f, overwrite = true)
+                Uri.fromFile(f)
             } catch (e: Exception) {
-                return null
+                null
             }
-            Uri.fromFile(f)
         }
     }
 }
