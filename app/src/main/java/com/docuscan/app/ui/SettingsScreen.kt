@@ -1,8 +1,5 @@
 package com.docuscan.app.ui
 
-import android.content.Intent
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -20,64 +16,21 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.docuscan.app.BuildConfig
 import com.docuscan.app.DocViewModel
 import com.docuscan.app.data.AppSettings
 import com.docuscan.app.scan.FILTERS
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @Composable
-fun SettingsScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
+fun SettingsScreen(vm: DocViewModel) {
     val s = vm.settings
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-
-    val langLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            scope.launch {
-                val code = withContext(Dispatchers.IO) { vm.importOcrLang(uri) }
-                if (code != null) {
-                    vm.updateSettings(vm.settings.copy(ocrLang = code))
-                    snackbar.showSnackbar("Imported OCR language '$code'")
-                } else {
-                    snackbar.showSnackbar("Couldn't import that language pack")
-                }
-            }
-        }
-    }
-
-    val inboxLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        if (uri != null) {
-            try {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                )
-            } catch (e: Exception) {
-            }
-            vm.updateSettings(vm.settings.copy(inboxUri = uri.toString(), inboxEnabled = true))
-            scope.launch { snackbar.showSnackbar("Inbox folder set") }
-        }
-    }
 
     Column(
         Modifier
@@ -92,6 +45,28 @@ fun SettingsScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
+        SectionTitle("Scanning")
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Auto-crop new images", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Detect and crop to the document edges automatically",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = s.autoCrop,
+                onCheckedChange = { vm.updateSettings(s.copy(autoCrop = it)) }
+            )
+        }
+
+        HorizontalDivider(Modifier.padding(vertical = 8.dp))
         SectionTitle("Default filter for new pages")
         Text(
             "Applied to every new page. You can still change it per page in the editor.",
@@ -131,108 +106,35 @@ fun SettingsScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
         )
 
         HorizontalDivider(Modifier.padding(vertical = 12.dp))
-        SectionTitle("JPEG export")
+        SectionTitle("PDF export")
         Text(
-            "Quality: ${s.jpegQuality}%",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Slider(
-            value = s.jpegQuality.toFloat(),
-            onValueChange = { vm.updateSettings(s.copy(jpegQuality = it.toInt())) },
-            valueRange = 50f..100f
-        )
-        Row(Modifier.padding(bottom = 6.dp)) {
-            FilterChip(
-                selected = s.jpegColor,
-                onClick = { vm.updateSettings(s.copy(jpegColor = true)) },
-                label = { Text("Color") }
-            )
-            Spacer(Modifier.width(8.dp))
-            FilterChip(
-                selected = !s.jpegColor,
-                onClick = { vm.updateSettings(s.copy(jpegColor = false)) },
-                label = { Text("Black & white") }
-            )
-        }
-
-        HorizontalDivider(Modifier.padding(vertical = 12.dp))
-        SectionTitle("OCR language")
-        Text(
-            "OCR runs fully offline on-device. Import .traineddata language packs (e.g. from tessdata_fast) for more languages.",
+            "Page format — Fit to image matches each page's own aspect ratio (no letterboxing).",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(Modifier.height(8.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(vm.ocrLangs) { lang ->
+            items(com.docuscan.app.data.PageFormat.entries) { f ->
                 FilterChip(
-                    selected = s.ocrLang == lang,
-                    onClick = { vm.updateSettings(s.copy(ocrLang = lang)) },
-                    label = { Text(lang) }
+                    selected = s.pageFormat == f.name,
+                    onClick = { vm.updateSettings(s.copy(pageFormat = f.name)) },
+                    label = { Text(f.label) }
                 )
             }
-            item {
-                OutlinedButton(onClick = { langLauncher.launch(arrayOf("*/*")) }) {
-                    Text("Import pack")
-                }
-            }
         }
-
-        HorizontalDivider(Modifier.padding(vertical = 12.dp))
-        SectionTitle("Inbox Mode")
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "Automatically save every export to a folder you choose",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (s.inboxEnabled && s.inboxUri.isNotBlank()) {
-                    Text(
-                        "Folder set",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
-                }
-            }
-            Switch(
-                checked = s.inboxEnabled,
-                onCheckedChange = { on ->
-                    if (on && s.inboxUri.isBlank()) {
-                        inboxLauncher.launch(null)
-                    } else {
-                        vm.updateSettings(s.copy(inboxEnabled = on))
-                    }
-                }
-            )
-        }
-        if (s.inboxEnabled && s.inboxUri.isNotBlank()) {
-            OutlinedButton(onClick = { inboxLauncher.launch(null) }) {
-                Text("Change folder")
-            }
-        }
-
-        HorizontalDivider(Modifier.padding(vertical = 12.dp))
-        SectionTitle("Accessibility Mode")
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "Spoken feedback and haptics; use the volume buttons as the shutter in the camera.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Switch(
-                checked = s.accessibilityEnabled,
-                onCheckedChange = { vm.updateSettings(s.copy(accessibilityEnabled = it)) }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "Quality preset — higher DPI = sharper text, larger file.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(8.dp))
+        com.docuscan.app.data.PdfQualityPreset.entries.forEach { q ->
+            RadioRow(
+                label = q.label,
+                hint = "${q.targetDpi} dpi${if (q.forceGrayscale) ", grayscale" else ""}",
+                selected = s.pdfQuality == q.name,
+                onClick = { vm.updateSettings(s.copy(pdfQuality = q.name)) }
             )
         }
 
@@ -261,10 +163,10 @@ fun SettingsScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
         SectionTitle("About")
         Row(Modifier.padding(vertical = 6.dp)) {
             Text("Version", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            Text(BuildConfig.VERSION_NAME, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("1.0.0", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text(
-            "DocuScan is a local-first document scanner: all scanning, OCR, filtering and export happens on your device. " +
+            "DocuScan is a local-first document scanner: all scanning, filtering and export happens on your device. " +
                 "Your documents stay yours.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant

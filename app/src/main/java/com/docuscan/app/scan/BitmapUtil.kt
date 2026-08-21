@@ -35,10 +35,8 @@ object BitmapUtil {
         return Bitmap.createBitmap(src, left, top, w, h)
     }
 
-    /** Perspective warp: map the four corners (TL,TR,BR,BL in bitmap coords) onto the full bitmap rectangle. */
-    fun perspectiveWarp(src: Bitmap, quad: List<android.graphics.PointF>): Bitmap {
-        val w = src.width
-        val h = src.height
+    /** Perspective warp: map the four corners (TL,TR,BR,BL in bitmap coords) onto a target rectangle. */
+    fun perspectiveWarp(src: Bitmap, quad: List<android.graphics.PointF>, outW: Int = src.width, outH: Int = src.height): Bitmap {
         val srcPts = floatArrayOf(
             quad[0].x, quad[0].y,
             quad[1].x, quad[1].y,
@@ -47,18 +45,43 @@ object BitmapUtil {
         )
         val dstPts = floatArrayOf(
             0f, 0f,
-            w.toFloat(), 0f,
-            w.toFloat(), h.toFloat(),
-            0f, h.toFloat()
+            outW.toFloat(), 0f,
+            outW.toFloat(), outH.toFloat(),
+            0f, outH.toFloat()
         )
         val m = Matrix()
         if (!m.setPolyToPoly(srcPts, 0, dstPts, 0, 4)) {
-            return crop(src, boundingRect(quad, w, h))
+            return crop(src, boundingRect(quad, src.width, src.height))
         }
-        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val out = Bitmap.createBitmap(outW.coerceAtLeast(1), outH.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
         val c = android.graphics.Canvas(out)
         c.drawColor(android.graphics.Color.WHITE)
         c.drawBitmap(src, m, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG or android.graphics.Paint.ANTI_ALIAS_FLAG))
+        return out
+    }
+
+    /** Downscale to fit within maxW x maxH (preserving aspect); no-op when already smaller. */
+    fun downscaleToFit(src: Bitmap, maxW: Int, maxH: Int): Bitmap {
+        if (src.width <= maxW && src.height <= maxH) return src
+        val s = minOf(maxW.toFloat() / src.width, maxH.toFloat() / src.height)
+        val w = (src.width * s).toInt().coerceAtLeast(1)
+        val h = (src.height * s).toInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(src, w, h, true)
+    }
+
+    /** Luminance-only copy. */
+    fun toGrayscale(src: Bitmap): Bitmap {
+        val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(out)
+        val p = android.graphics.Paint().apply { colorFilter = android.graphics.ColorMatrixColorFilter(
+            android.graphics.ColorMatrix(floatArrayOf(
+                0.299f, 0.587f, 0.114f, 0f, 0f,
+                0.299f, 0.587f, 0.114f, 0f, 0f,
+                0.299f, 0.587f, 0.114f, 0f, 0f,
+                0f, 0f, 0f, 1f, 0f
+            ))
+        ) }
+        c.drawBitmap(src, 0f, 0f, p)
         return out
     }
 

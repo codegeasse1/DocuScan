@@ -9,22 +9,27 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,20 +40,17 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import com.docuscan.app.scan.AutoCrop
 import com.docuscan.app.scan.BitmapUtil
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import com.docuscan.app.scan.CropAspectRatio
+import com.docuscan.app.scan.CropGeometry
 import kotlin.math.abs
+import kotlin.math.hypot
 
 @Composable
 fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit) {
     var boxSize by remember { mutableStateOf(IntSize.Zero) }
-    val scope = rememberCoroutineScope()
     val fit = remember(boxSize) {
         if (boxSize.width == 0 || boxSize.height == 0) {
             Rect(0f, 0f, 1f, 1f)
@@ -69,63 +71,36 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
 
     // Normalized corners (0..1) inside the fit rect: TL, TR, BR, BL
     val norm = remember { mutableStateListOf(0.02f, 0.02f, 0.98f, 0.02f, 0.98f, 0.98f, 0.02f, 0.98f) }
-    var dragIndex by remember { mutableIntStateOf(-1) }
-    var userDragged by remember { mutableStateOf(false) }
-    var detecting by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf("") }
+    var dragCorner by remember { mutableIntStateOf(-1) }
+    var dragEdge by remember { mutableIntStateOf(-1) }
+    var customRatio by remember { mutableStateOf(1.4142f) }
+    var customDialog by remember { mutableStateOf(false) }
+    var aspectRatio by remember { mutableStateOf(CropAspectRatio.AUTO) }
+    var snapActive by remember { mutableStateListOf(false, false, false, false) }
+    var snapHighlight by remember { mutableIntStateOf(-1) }
 
-    fun corner(i: Int): Offset {
+    fun viewCorner(i: Int): Offset {
         val f = fit
         return Offset(f.left + norm[i * 2] * f.width, f.top + norm[i * 2 + 1] * f.height)
     }
 
-    fun applyCrop() {
-        var a = 0f
-        for (i in 0..3) {
-            val j = (i + 1) % 4
-            a += norm[i * 2] * norm[j * 2 + 1] - norm[j * 2] * norm[i * 2 + 1]
-        }
-        if (abs(a) / 2f < 0.02f) return
+    fun viewCornerPairs(): List<Pair<Double, Double>> =
+        (0..3).map { viewCorner(it).x.toDouble() to viewCorner(it).y.toDouble() }
+
+    fun setViewCorner(i: Int, x: Float, y: Float) {
         val f = fit
-        val q = (0..3).map { idx ->
-            val p = corner(idx)
-            PointF(
-                ((p.x - f.left) / f.width) * bitmap.width,
-                ((p.y - f.top) / f.height) * bitmap.height
-            )
-        }
-        onApply(BitmapUtil.perspectiveWarp(bitmap, q))
+        norm[i * 2] = ((x - f.left) / f.width).coerceIn(0.001f, 0.999f)
+        norm[i * 2 + 1] = ((y - f.top) / f.height).coerceIn(0.001f, 0.999f)
     }
 
-    fun autoDetect() {
-        scope.launch {
-            detecting = true
-            status = "Detecting page corners…"
-            val pts = withContext(Dispatchers.IO) { AutoCrop.detectCorners(bitmap) }
-            detecting = false
-            when {
-                pts != null && !userDragged -> {
-                    for (i in 0..3) {
-                        norm[i * 2] = (pts[i].x / bitmap.width).coerceIn(0.005f, 0.995f)
-                        norm[i * 2 + 1] = (pts[i].y / bitmap.height).coerceIn(0.005f, 0.995f)
-                    }
-                    status = "Corners detected — drag them or tap Crop"
-                }
-                pts != null -> status = "Corners detected — drag them or tap Crop"
-                else -> status = "No page found — drag the corners to crop"
-            }
-        }
-    }
-
-    fun reset() {
-        norm[0] = 0.02f; norm[1] = 0.02f
-        norm[2] = 0.98f; norm[3] = 0.02f
-        norm[4] = 0.98f; norm[5] = 0.98f
-        norm[6] = 0.02f; norm[7] = 0.98f
-        status = "Reset — drag the corners to crop"
-    }
-
-    LaunchedEffect(Unit) { autoDetect() }
+    // Frozen edge-drag state (captured at touch-down)
+    val edgeXs0 = remember { FloatArray(4) }
+    val edgeYs0 = remember { FloatArray(4) }
+    var edgeIdx by remember { mutableIntStateOf(-1) }
+    var edgeM0x by remember { mutableStateOf(0f) }
+    var edgeM0y by remember { mutableStateOf(0f) }
+    var edgeNx by remember { mutableStateOf(0f) }
+    var edgeNy by remember { mutableStateOf(0f) }
 
     val accent = MaterialTheme.colorScheme.primary
     val accentInt = accent.toArgbCompat()
@@ -134,7 +109,7 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
         Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .onSizeChanged { boxSize = it }
+            .onSizeChanged { size = it }
     ) {
         Canvas(
             Modifier
@@ -142,29 +117,87 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
                 .pointerInput(boxSize) {
                     detectDragGestures(
                         onDragStart = { pos ->
-                            userDragged = true
+                            // Corner hit first (larger radius), then edge hit.
                             var best = -1
-                            var bestD = 90f
+                            var bestD = 70f
                             for (i in 0..3) {
-                                val d = (corner(i) - pos).getDistance()
+                                val d = (viewCorner(i) - pos).getDistance()
                                 if (d < bestD) {
                                     bestD = d
                                     best = i
                                 }
                             }
-                            dragIndex = best
+                            if (best >= 0) {
+                                dragCorner = best
+                                dragEdge = -1
+                                return@detectDragGestures
+                            }
+                            val xs = FloatArray(4) { viewCorner(it).x }
+                            val ys = FloatArray(4) { viewCorner(it).y }
+                            val e = CropGeometry.findEdgeHit(xs, ys, pos.x, pos.y)
+                            if (e >= 0) {
+                                dragEdge = e
+                                dragCorner = -1
+                                edgeIdx = e
+                                val a = e
+                                val b = (e + 1) % 4
+                                for (i in 0..3) {
+                                    val c = viewCorner(i)
+                                    edgeXs0[i] = c.x
+                                    edgeYs0[i] = c.y
+                                }
+                                edgeM0x = (edgeXs0[a] + edgeXs0[b]) / 2f
+                                edgeM0y = (edgeYs0[a] + edgeYs0[b]) / 2f
+                                val n = CropGeometry.outwardUnitNormal(edgeXs0, edgeYs0, e)
+                                edgeNx = n[0]
+                                edgeNy = n[1]
+                            }
                         },
                         onDrag = { change, _ ->
-                            val i = dragIndex
-                            if (i >= 0) {
-                                val f = fit
-                                norm[i * 2] = ((change.position.x - f.left) / f.width).coerceIn(0.01f, 0.99f)
-                                norm[i * 2 + 1] = ((change.position.y - f.top) / f.height).coerceIn(0.01f, 0.99f)
+                            if (dragEdge >= 0) {
+                                val res = CropGeometry.applyEdgeTranslation(
+                                    edgeXs0, edgeYs0, edgeIdx,
+                                    edgeM0x, edgeM0y, edgeNx, edgeNy,
+                                    change.position.x, change.position.y
+                                )
+                                if (res.applied) {
+                                    for (i in 0..3) setViewCorner(i, res.xs[i], res.ys[i])
+                                }
+                            } else if (dragCorner >= 0) {
+                                val i = dragCorner
+                                val newX = change.position.x.coerceIn(fit.left, fit.right)
+                                val newY = change.position.y.coerceIn(fit.top, fit.bottom)
+                                val corners = viewCornerPairs()
+                                val res = CropGeometry.snapEvaluate(
+                                    corners, i,
+                                    newX.toDouble(), newY.toDouble(),
+                                    snapActive[(i + 3) % 4], snapActive[i]
+                                )
+                                setViewCorner(i, res.x.toFloat(), res.y.toFloat())
+                                snapActive[(i + 3) % 4] = res.prevEdgeSnapped
+                                snapActive[i] = res.nextEdgeSnapped
+                                snapHighlight = when {
+                                    res.prevEdgeSnapped -> (i + 3) % 4
+                                    res.nextEdgeSnapped -> i
+                                    else -> -1
+                                }
                             }
                             change.consume()
                         },
-                        onDragEnd = { dragIndex = -1 },
-                        onDragCancel = { dragIndex = -1 }
+                        onDragEnd = {
+                            dragCorner = -1
+                            dragEdge = -1
+                            edgeIdx = -1
+                            for (i in 0..3) snapActive[i] = false
+                            snapHighlight = -1
+                        },
+                        onDragCancel = {
+                            dragCorner = -1
+                            dragEdge = -1
+                            edgeIdx = -1
+                            for (i in 0..3) snapActive[i] = false
+                            snapHighlight = -1
+                        }
                     )
                 }
         ) {
@@ -174,10 +207,10 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
 
             canvas.drawBitmap(bitmap, null, rect, Paint(Paint.FILTER_BITMAP_FLAG))
 
-            val c0 = corner(0)
-            val c1 = corner(1)
-            val c2 = corner(2)
-            val c3 = corner(3)
+            val c0 = viewCorner(0)
+            val c1 = viewCorner(1)
+            val c2 = viewCorner(2)
+            val c3 = viewCorner(3)
 
             val quad = Path().apply {
                 moveTo(c0.x, c0.y)
@@ -212,38 +245,143 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
                 color = accentInt
             })
 
+            // Edge midpoint handles (parallel edge dragging)
+            val midPaint = Paint().apply {
+                color = android.graphics.Color.WHITE
+                style = Paint.Style.STROKE
+                strokeWidth = 3.dp.toPx()
+            }
+            val corners = arrayOf(c0, c1, c2, c3)
             for (i in 0..3) {
-                val c = corner(i)
+                val a = corners[i]
+                val b = corners[(i + 1) % 4]
+                canvas.drawLine(
+                    (a.x + b.x) / 2f - 6.dp.toPx(), (a.y + b.y) / 2f,
+                    (a.x + b.x) / 2f + 6.dp.toPx(), (a.y + b.y) / 2f,
+                    midPaint
+                )
+                canvas.drawLine(
+                    (a.x + b.x) / 2f, (a.y + b.y) / 2f - 6.dp.toPx(),
+                    (a.x + b.x) / 2f, (a.y + b.y) / 2f + 6.dp.toPx(),
+                    midPaint
+                )
+            }
+
+            // Snap-to-right-angle highlight: brighter, thicker edge
+            if (snapHighlight in 0..3) {
+                val a = corners[snapHighlight]
+                val b = corners[(snapHighlight + 1) % 4]
+                canvas.drawLine(a.x, a.y, b.x, b.y, Paint().apply {
+                    color = Color.White.toArgbCompat()
+                    style = Paint.Style.STROKE
+                    strokeWidth = 5.dp.toPx()
+                })
+            }
+
+            for (i in 0..3) {
+                val c = viewCorner(i)
                 canvas.drawCircle(c.x, c.y, 14.dp.toPx(), Paint().apply { color = android.graphics.Color.WHITE })
                 canvas.drawCircle(c.x, c.y, 9.dp.toPx(), Paint().apply { color = accentInt })
             }
         }
 
-        Row(
+        Column(
             Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = 4.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(horizontal = 8.dp, vertical = 8.dp)
         ) {
-            TextButton(onClick = onCancel) { Text("Cancel", color = Color.White) }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onCancel) { Text("Cancel", color = Color.White) }
+                Text("Adjust corners", color = Color.White.copy(alpha = 0.8f))
+                TextButton(onClick = {
+                    // Validate quad area (shoelace, normalized coords)
+                    var a = 0f
+                    for (i in 0..3) {
+                        val j = (i + 1) % 4
+                        a += norm[i * 2] * norm[j * 2 + 1] - norm[j * 2] * norm[i * 2 + 1]
+                    }
+                    if (abs(a) / 2f < 0.02f) return@TextButton
+                    val f = fit
+                    val q = (0..3).map { idx ->
+                        val p = viewCorner(idx)
+                        PointF(
+                            ((p.x - f.left) / f.width) * bitmap.width,
+                            ((p.y - f.top) / f.height) * bitmap.height
+                        )
+                    }
+                    // Output size: pixel-distance estimate, optionally constrained to a ratio
+                    fun seg(a: PointF, b: PointF) = hypot(b.x - a.x, b.y - a.y)
+                    var w = (seg(q[0], q[1]) + seg(q[3], q[2])) / 2f
+                    var h = (seg(q[0], q[3]) + seg(q[1], q[2])) / 2f
+                    val ratio = if (aspectRatio == CropAspectRatio.CUSTOM) customRatio.toDouble()
+                    else aspectRatio.shortOverLong()
+                    if (ratio != null) {
+                        if (w >= h) h = (w * ratio).toFloat()
+                        else w = (h * ratio).toFloat()
+                    }
+                    val outW = w.toInt().coerceAtLeast(2)
+                    val outH = h.toInt().coerceAtLeast(2)
+                    onApply(BitmapUtil.perspectiveWarp(bitmap, q, outW, outH))
+                }) {
+                    Text("Apply", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+
             Text(
-                if (detecting) "Detecting…" else status,
-                modifier = Modifier.weight(1f),
-                color = Color.White.copy(alpha = 0.85f),
-                style = MaterialTheme.typography.labelMedium,
-                textAlign = TextAlign.Center
+                "Drag corners or edges · edges snap to 90°",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White.copy(alpha = 0.6f)
             )
-            TextButton(onClick = { autoDetect() }) {
-                Text("Auto", color = Color.White, fontWeight = FontWeight.SemiBold)
-            }
-            TextButton(onClick = { reset() }) {
-                Text("Reset", color = Color.White)
-            }
-            TextButton(onClick = { applyCrop() }) {
-                Text("Crop", color = Color.White, fontWeight = FontWeight.Bold)
+
+            LazyRow(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                items(CropAspectRatio.entries) { r ->
+                    FilterChip(
+                        selected = aspectRatio == r,
+                        onClick = {
+                            if (r == CropAspectRatio.CUSTOM) customDialog = true else aspectRatio = r
+                        },
+                        label = { Text(r.label, color = Color.White) }
+                    )
+                }
             }
         }
+    }
+
+    if (customDialog) {
+        AlertDialog(
+            onDismissRequest = { customDialog = false },
+            title = { Text("Custom aspect ratio") },
+            text = {
+                Column {
+                    Text("Enter the short : long ratio (e.g. 0.71 for A4, 1.0 for square).")
+                    OutlinedTextField(
+                        value = customRatio.toString(),
+                        onValueChange = { v ->
+                            val p = v.replace(',', '.').toFloatOrNull()
+                            if (p != null && p in 0.1f..10f) customRatio = p
+                        },
+                        singleLine = true,
+                        label = { Text("Ratio") }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { customDialog = false; aspectRatio = CropAspectRatio.CUSTOM }) {
+                    Text("Use")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { customDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 
