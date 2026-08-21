@@ -350,7 +350,7 @@ object Cleanup {
                     val approxAsPoints = MatOfPoint(*approx.toArray())
                     val isConvex = Imgproc.isContourConvex(approxAsPoints)
                     approxAsPoints.release()
-                    if (approx.total() == 4 && isConvex) {
+                    if (approx.total() == 4L && isConvex) {
                         val quad = sortPointsRobust(approx.toArray())
                         val w1 = distance(quad[0], quad[1])
                         val w2 = distance(quad[2], quad[3])
@@ -405,7 +405,7 @@ object Cleanup {
         try {
             val minLineLength = max(30, min(imgW, imgH) / 10)
             val threshold = max(50, minLineLength / 2)
-            Imgproc.HoughLinesP(edges, lines, 1.0, Math.PI / 180.0, threshold, minLineLength, 10)
+            Imgproc.HoughLinesP(edges, lines, 1.0, Math.PI / 180.0, threshold.toDouble(), minLineLength.toDouble(), 10)
             if (lines.rows() < 4) return null
 
             val horizontal = mutableListOf<DoubleArray>()
