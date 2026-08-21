@@ -9,6 +9,7 @@ camerax = "1.4.1"
 tess4android = "4.9.0"
 documentfile = "1.0.1"
 opencv = "4.13.0"
+onnxruntime = "1.19.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -29,6 +30,7 @@ androidx-camera-view = { group = "androidx.camera", name = "camera-view", versio
 tesseract4android = { group = "com.github.adaptech-cz.Tesseract4Android", name = "tesseract4android", version.ref = "tess4android" }
 androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentfile" }
 opencv = { group = "org.opencv", name = "opencv", version.ref = "opencv" }
+onnxruntime = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxruntime" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

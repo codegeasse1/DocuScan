@@ -45,12 +45,67 @@ object AutoCrop {
 
     /**
      * Detect page corners in [src] image space. Result order: TL, TR, BR, BL.
-     * Tries the MakeACopy OpenCV pipeline first, then the built-in detector.
+     *
+     * MakeACopy pipeline: DocQuadNet-256 (ONNX) first, edge-snap refined and
+     * plausibility-gated; then the OpenCV corner detector, also edge-snap
+     * refined; then the built-in detector. Falls back to the full image
+     * rectangle when nothing plausible is found (like makeacopy's fallbackRect)
+     * so a bad detection can never crop the image in half.
      */
-    fun detectCorners(src: Bitmap): List<PointF>? {
-        Cleanup.detectCorners(src)?.let { return it }
-        return detectCornersJava(src)
+    fun detectCorners(src: Bitmap): List<PointF> {
+        Cleanup.ensureLoaded()
+        val fallback = fullRectCorners(src.width, src.height)
+
+        // 1. DocQuadNet-256 neural detector (the makeacopy primary path)
+        try {
+            val dr = DocQuadDetector.detect(src)
+            if (dr.success && dr.cornersOriginalTLTRBRBL != null) {
+                val refined = EdgeSnapCornerRefiner.refine(src, dr.cornersOriginalTLTRBRBL)
+                val pts = quadToPointF(refined)
+                if (QuadPlausibility.isPlausible(pts.toTypedArray(), src.width, src.height)) return pts
+            }
+        } catch (_: Throwable) {
+        }
+
+        // 2. OpenCV corner detector
+        try {
+            Cleanup.detectCorners(src)?.let { c ->
+                val arr = c.map { doubleArrayOf(it.x.toDouble(), it.y.toDouble()) }.toTypedArray()
+                val refined = EdgeSnapCornerRefiner.refine(src, arr)
+                val pts = quadToPointF(refined)
+                if (QuadPlausibility.isPlausible(pts.toTypedArray(), src.width, src.height)) return pts
+            }
+        } catch (_: Throwable) {
+        }
+
+        // 3. Built-in fallback detector
+        return detectCornersJava(src) ?: fallback
     }
+
+    /** True if the four corners describe the full image rectangle (detection failed). */
+    fun isFullFrame(pts: List<PointF>?, w: Int, h: Int): Boolean {
+        if (pts == null || pts.size != 4) return false
+        val m = max(20, min(w, h) / 10).toDouble()
+        val c = doubleArrayOf(m, m, (w - m).toDouble(), m, (w - m).toDouble(), (h - m).toDouble(), m, (h - m).toDouble())
+        val e = 8.0
+        return abs(pts[0].x - c[0]) <= e && abs(pts[0].y - c[1]) <= e &&
+            abs(pts[1].x - c[2]) <= e && abs(pts[1].y - c[3]) <= e &&
+            abs(pts[2].x - c[4]) <= e && abs(pts[2].y - c[5]) <= e &&
+            abs(pts[3].x - c[6]) <= e && abs(pts[3].y - c[7]) <= e
+    }
+
+    private fun fullRectCorners(w: Int, h: Int): List<PointF> {
+        val m = max(20, min(w, h) / 10).toFloat()
+        return listOf(
+            PointF(m, m),
+            PointF(w - m, m),
+            PointF(w - m, h - m),
+            PointF(m, h - m)
+        )
+    }
+
+    private fun quadToPointF(q: Array<DoubleArray>): List<PointF> =
+        q.map { PointF(it[0].toFloat(), it[1].toFloat()) }
 
     private fun detectCornersJava(src: Bitmap): List<PointF>? {
         val w0 = src.width

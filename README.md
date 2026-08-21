@@ -11,6 +11,7 @@ Built with **Kotlin + Jetpack Compose (Material 3) + CameraX**, modeled after th
 - 📄 **PDF import** — open an existing PDF and its pages become editable pages
 - 🧭 **Manual perspective crop** — drag the four corners **or the edges** (parallel edge translation), with a **snap-to-right-angle** assist that locks near-vertical/horizontal edges to 90° and **aspect-ratio presets** (Auto, Original, A3/A4/A5, US Letter, Legal, custom) enforced at warp time; output is deskewed via perspective warp
 - 🎯 **Auto-align crop frame** — one tap aligns the crop guides to the detected page corners; nothing is cropped until you tap **Crop**, and you can still drag any corner afterwards to fine-tune
+- 🧠 **MakeACopy corner detection, exactly** — the full DocQuadNet-256 ONNX neural detector (portable Runtime), the 5×5-quadratic peak refinement + corner/mask path chooser, gradient **edge-snap refinement**, and geometry **plausibility gating**, with the OpenCV detector as fallback and the full-image rectangle as the safe last resort — a bad detection can never crop the image in half
 - ✂️ **Smart corner detection** — real corner-detection finds the page's four corners (works on a photo of a page lying on a bed, desk, or any background)
 - ✨ **MakeACopy document cleanup** — the same OpenCV presets: **Natural**, **Enhanced** and **Clean Text** (background flattening, CLAHE local contrast, OCR-grade clean-up), on top of the 19 classic filters
 - ⚡ **One-tap Auto crop** — detect the page and perspective-warp to it instantly (OpenCV contour pipeline with Hough fallback, same as MakeACopy)
@@ -59,8 +60,12 @@ app/src/main/java/com/docuscan/app/
 ├── A11y.kt                # Accessibility Mode: TTS + haptics
 ├── DocViewModel.kt        # Shared state (pages, settings, history, OCR)
 ├── scan/                  # The engine
-│   ├── AutoCrop.kt        # Corner detection (OpenCV first, built-in fallback) -> quad
+│   ├── AutoCrop.kt        # Corner detection (MakeACopy pipeline: DocQuadNet-256 → edge-snap → OpenCV → full-frame fallback)
 │   ├── Cleanup.kt         # OpenCV document cleanup (Natural/Enhanced/Clean Text) + corner detector
+│   ├── DocQuad.kt         # DocQuadNet-256 letterbox + score + postprocessor (MakeACopy port)
+│   ├── DocQuadOrtRunner.kt# ONNX Runtime inference for DocQuadNet-256
+│   ├── DocQuadDetector.kt # Detection result, plausibility gates, gradient edge-snap refiner
+│   ├── WarpTarget.kt      # Warp target size: Zhang & He projective estimate + fixed ratios
 │   ├── ImageFilters.kt    # 22 filters (incl. MakeACopy cleanup presets) + Otsu B&W + sharpen
 │   ├── CropGeometry.kt    # Edge dragging + snap-to-right-angle geometry (MakeACopy port)
 │   ├── CropAspectRatio.kt # Crop aspect-ratio presets enforced at warp time
@@ -82,6 +87,8 @@ app/src/main/java/com/docuscan/app/
 
 - **Tesseract4Android** (Apache 2.0) and **tessdata_fast** `eng.traineddata` (Apache 2.0) — offline OCR.
 - **OpenCV 4.13.0** (Apache 2.0) — corner detection and document cleanup presets, like MakeACopy.
+- **ONNX Runtime Android** (MIT) — runs the DocQuadNet-256 document-corner model.
+- **DocQuadNet-256** `docquad/docquadnet256_trained_opset17.ort` (Apache 2.0) — bundled with makeacopy (github.com/egdels/makeacopy); rebuild/update by downloading the asset from that repo's `app/src/main/assets/docquad/` and replacing `app/src/main/assets/docquad/`.
 - **Word frequency data**: ["Word Frequency" by Hermit Dave](https://github.com/hermitdave/FrequencyWords) (CC BY-SA 4.0) — used for OCR suggestions, like MakeACopy.
 
 ## License

@@ -11,6 +11,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         A11y.init(this)
+        com.docuscan.app.scan.AppCtx.app = applicationContext
         enableEdgeToEdge()
         setContent {
             DocuScanTheme {

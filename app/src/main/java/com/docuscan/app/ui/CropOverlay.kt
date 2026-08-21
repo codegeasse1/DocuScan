@@ -49,11 +49,11 @@ import com.docuscan.app.scan.AutoCrop
 import com.docuscan.app.scan.BitmapUtil
 import com.docuscan.app.scan.CropAspectRatio
 import com.docuscan.app.scan.CropGeometry
+import com.docuscan.app.scan.WarpTarget
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
-import kotlin.math.hypot
 
 /** Frozen state captured at edge-drag touch-down (parallel translation). */
 private class EdgeDrag(
@@ -127,19 +127,30 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
                 ((p.y - f.top) / f.height) * bitmap.height
             )
         }
-        // Output size: pixel-distance estimate, optionally constrained to an aspect ratio.
-        fun seg(a: PointF, b: PointF) = hypot(b.x - a.x, b.y - a.y)
-        var w = (seg(q[0], q[1]) + seg(q[3], q[2])) / 2f
-        var h = (seg(q[0], q[3]) + seg(q[1], q[2])) / 2f
-        val ratio: Double? = if (aspectRatio == CropAspectRatio.CUSTOM) {
-            customRatioText.replace(',', '.').toFloatOrNull()?.toDouble()
-        } else {
-            aspectRatio.shortOverLong()
+        // MakeACopy warp target-size semantics: Auto = Zhang & He projective estimate,
+        // Original = pixel-distance heuristic, fixed ratios = explicit short/long.
+        val mode: WarpTarget.WarpMode
+        val ratio: Double?
+        when (aspectRatio) {
+            CropAspectRatio.AUTO -> {
+                mode = WarpTarget.WarpMode.AUTO_PROJECTIVE
+                ratio = null
+            }
+            CropAspectRatio.ORIGINAL -> {
+                mode = WarpTarget.WarpMode.LEGACY_HEURISTIC
+                ratio = null
+            }
+            CropAspectRatio.CUSTOM -> {
+                mode = WarpTarget.WarpMode.FIXED_RATIO
+                ratio = customRatioText.replace(',', '.').toFloatOrNull()?.toDouble()
+            }
+            else -> {
+                mode = WarpTarget.WarpMode.FIXED_RATIO
+                ratio = aspectRatio.shortOverLong()
+            }
         }
-        if (ratio != null) {
-            if (w >= h) h = (w * ratio).toFloat() else w = (h * ratio).toFloat()
-        }
-        onApply(BitmapUtil.perspectiveWarp(bitmap, q, w.toInt().coerceAtLeast(2), h.toInt().coerceAtLeast(2)))
+        val (outW, outH) = WarpTarget.compute(q.toTypedArray(), mode, ratio, bitmap.width, bitmap.height)
+        onApply(BitmapUtil.perspectiveWarp(bitmap, q, outW, outH))
     }
 
     fun autoDetect() {
@@ -148,16 +159,16 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
             status = "Detecting page corners…"
             val pts = withContext(Dispatchers.IO) { AutoCrop.detectCorners(bitmap) }
             detecting = false
-            when {
-                pts != null && !userDragged -> {
-                    for (i in 0..3) {
-                        norm[i * 2] = (pts[i].x / bitmap.width).coerceIn(0.005f, 0.995f)
-                        norm[i * 2 + 1] = (pts[i].y / bitmap.height).coerceIn(0.005f, 0.995f)
-                    }
-                    status = "Corners detected — drag them or tap Crop"
+            if (AutoCrop.isFullFrame(pts, bitmap.width, bitmap.height)) {
+                status = "No page found — drag the corners to crop"
+            } else {
+                status = "Corners detected — drag them or tap Crop"
+            }
+            if (!userDragged) {
+                for (i in 0..3) {
+                    norm[i * 2] = (pts[i].x / bitmap.width).coerceIn(0.005f, 0.995f)
+                    norm[i * 2 + 1] = (pts[i].y / bitmap.height).coerceIn(0.005f, 0.995f)
                 }
-                pts != null -> status = "Corners detected — drag them or tap Crop"
-                else -> status = "No page found — drag the corners to crop"
             }
         }
     }

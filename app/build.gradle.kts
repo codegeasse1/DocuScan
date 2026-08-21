@@ -94,5 +94,6 @@ dependencies {
     implementation(libs.tesseract4android)
     implementation(libs.androidx.documentfile)
     implementation(libs.opencv)
+    implementation(libs.onnxruntime)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
