@@ -81,24 +81,9 @@ jobs:
           {
             echo "Run: ${{ github.run_number }} — commit ${{ github.sha }}"
             echo ""
-            echo "```"
-            tail -c 12000 /tmp/gradle.log | tr '\r' '\n' | grep -vE '^[[:space:]]*
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: "${{ steps.version.outputs.tag }}"
-          name: "DocuScan ${{ steps.version.outputs.version_name }}"
-          body: |
-            Auto-built from `main`.
-
-            - Build: `${{ github.run_number }}`
-            - Commit: `${{ github.sha }}`
-          files: app/build/outputs/apk/release/app-release.apk
-          fail_on_unmatched_files: true
-          make_latest: true
- | tail -n 160
-            echo "```"
+            echo '```'
+            tail -c 12000 /tmp/gradle.log | tr '\r' '\n' | grep -vE '^[[:space:]]*$' | tail -n 160
+            echo '```'
           } > /tmp/issue.md
           python3 - <<'EOF'
           import json, os, urllib.request
