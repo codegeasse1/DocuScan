@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   build:
@@ -86,7 +87,7 @@ jobs:
             echo '```'
           } > /tmp/issue.md
           python3 - <<'EOF'
-          import json, os, urllib.request
+          import json, os, urllib.request, urllib.error
           body = open('/tmp/issue.md', encoding='utf-8', errors='replace').read()
           data = json.dumps({
               "title": "Build failure (run " + os.environ.get("GITHUB_RUN_NUMBER", "?") + ")",
@@ -101,9 +102,12 @@ jobs:
                   "User-Agent": "docuscan"
               })
           try:
-              urllib.request.urlopen(req)
+              resp = urllib.request.urlopen(req)
+              print("issue created:", resp.status)
+          except urllib.error.HTTPError as e:
+              print("issue post failed:", e.code, e.read().decode('utf-8', 'replace')[:500])
           except Exception as e:
-              print("issue post failed:", e)
+              print("issue post error:", e)
           EOF
 
       - name: Create GitHub Release
