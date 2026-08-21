@@ -86,6 +86,10 @@ dependencies {
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
-    implementation(libs.tesseract4android)
+    implementation(libs.tesseract4android) {
+        // JitPack's tesseract4android POM also pulls the openmp variant, which
+        // duplicates classes/native libs — use the standard variant only.
+        exclude(group = "com.github.adaptech-cz", module = "tesseract4android-openmp")
+    }
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
