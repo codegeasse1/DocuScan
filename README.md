@@ -1,6 +1,6 @@
 # DocuScan 📄
 
-A modern, local-first Android document scanner. Capture or import images, auto-detect document edges, apply 12+ filters, build multi-page documents, and export as PDF or JPG.
+A modern, local-first Android document scanner. Capture or import images, auto-align crop guides to the detected page corners, apply 18 filters, build multi-page documents, and export as PDF or JPG.
 
 Built with **Kotlin + Jetpack Compose (Material 3) + CameraX**.
 
@@ -8,9 +8,10 @@ Built with **Kotlin + Jetpack Compose (Material 3) + CameraX**.
 
 - 📷 **Camera capture** with in-app preview, flash & front/back flip (CameraX)
 - 🖼️ **Gallery import** (system photo picker — no storage permissions needed)
-- ✂️ **Auto-crop** — edge-detection algorithm finds the document in any image
+- ✂️ **Smart corner detection** — real corner-detection finds the page's four corners (works on a photo of a page lying on a bed, desk, or any background), so photos that are *not* of a page are never touched
 - 🧭 **Manual perspective crop** — drag the four corners, output is deskewed via perspective warp
-- 🎨 **12 filters** — Original, Enhance, B&W, Grayscale, Sepia, Invert, Warm, Cool, Vivid, Faded, Crisp, Night
+- 🎯 **Auto-align crop frame** — one tap aligns the crop guides to the detected page corners; nothing is cropped until you tap **Crop**, and you can still drag any corner afterwards to fine-tune
+- 🎨 **18 filters** — Original, Magic, B&W (real Otsu threshold binarization), Grayscale, Sepia, Polaroid, Vintage, Soft, Warm, Cool, Ocean, Rose, Blue, Invert, Vivid, Faded, Crisp, Night
 - 🔆 **Brightness & contrast** sliders
 - 📚 **Multi-page documents** — add/remove/reorder pages
 - 📄 **Export to PDF** (multi-page, A4) and/or **JPG** — saved to `Pictures/DocuScan` / `Download/DocuScan` via MediaStore
@@ -48,8 +49,8 @@ app/src/main/java/com/docuscan/app/
 ├── App.kt                 # Navigation + bottom bar
 ├── DocViewModel.kt        # Shared state (pages, settings, history)
 ├── scan/                  # The engine
-│   ├── AutoCrop.kt        # Edge detection via gradient + union-find
-│   ├── ImageFilters.kt    # 12 color-matrix filters
+│   ├── AutoCrop.kt        # Corner detection: gradient thresholds, components, hull -> quad
+│   ├── ImageFilters.kt    # 18 color-matrix filters + Otsu B&W binarization
 │   ├── BitmapUtil.kt      # Rotate/crop/perspective-warp/EXIF
 │   ├── PdfExporter.kt     # android.graphics.pdf PDF writer
 │   ├── MediaSaver.kt      # MediaStore saves

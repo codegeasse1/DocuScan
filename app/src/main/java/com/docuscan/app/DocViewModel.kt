@@ -12,7 +12,6 @@ import androidx.lifecycle.AndroidViewModel
 import com.docuscan.app.data.AppSettings
 import com.docuscan.app.data.DocRecord
 import com.docuscan.app.data.HistoryStore
-import com.docuscan.app.scan.AutoCrop
 import com.docuscan.app.scan.BitmapUtil
 import java.util.concurrent.atomic.AtomicLong
 
@@ -78,9 +77,8 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
     fun addBitmap(raw: Bitmap) {
         var b = BitmapUtil.fitMax(raw, 2400)
         if (b !== raw) raw.recycle()
-        if (settings.autoCrop) {
-            AutoCrop.findBounds(b)?.let { b = BitmapUtil.crop(b, it) }
-        }
+        // Images are never cropped automatically - the user crops (or auto-aligns
+        // the crop frame) in the editor, so nothing is lost on import.
         pages.add(ScannedPage(idCounter.incrementAndGet(), b, settings.defaultFilter))
         selectedPage = pages.size - 1
         screen = Screen.Editor

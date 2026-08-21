@@ -17,13 +17,13 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.docuscan.app.BuildConfig
 import com.docuscan.app.DocViewModel
 import com.docuscan.app.data.AppSettings
 import com.docuscan.app.scan.FILTERS
@@ -45,28 +45,6 @@ fun SettingsScreen(vm: DocViewModel) {
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        SectionTitle("Scanning")
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Auto-crop new images", style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    "Detect and crop to the document edges automatically",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Switch(
-                checked = s.autoCrop,
-                onCheckedChange = { vm.updateSettings(s.copy(autoCrop = it)) }
-            )
-        }
-
-        HorizontalDivider(Modifier.padding(vertical = 8.dp))
         SectionTitle("Default filter for new pages")
         Text(
             "Applied to every new page. You can still change it per page in the editor.",
@@ -130,7 +108,7 @@ fun SettingsScreen(vm: DocViewModel) {
         SectionTitle("About")
         Row(Modifier.padding(vertical = 6.dp)) {
             Text("Version", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            Text("1.0.0", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(BuildConfig.VERSION_NAME, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text(
             "DocuScan is a local-first document scanner: all scanning, filtering and export happens on your device. " +
