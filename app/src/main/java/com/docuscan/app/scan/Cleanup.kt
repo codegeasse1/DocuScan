@@ -405,7 +405,7 @@ object Cleanup {
         try {
             val minLineLength = max(30, min(imgW, imgH) / 10)
             val threshold = max(50, minLineLength / 2)
-            Imgproc.HoughLinesP(edges, lines, 1.0, Math.PI / 180.0, threshold.toDouble(), minLineLength.toDouble(), 10)
+            Imgproc.HoughLinesP(edges, lines, 1.0, Math.PI / 180.0, threshold, minLineLength.toDouble(), 10.0)
             if (lines.rows() < 4) return null
 
             val horizontal = mutableListOf<DoubleArray>()
