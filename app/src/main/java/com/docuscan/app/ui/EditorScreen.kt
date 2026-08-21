@@ -78,6 +78,7 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
     val page = vm.pages.getOrNull(vm.selectedPage)
 
     var cropMode by remember { mutableStateOf(false) }
+    var ocrMode by remember { mutableStateOf(false) }
     var showAdjust by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
     var saveMenu by remember { mutableStateOf(false) }
@@ -138,6 +139,11 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
             },
             onCancel = { cropMode = false }
         )
+        return
+    }
+
+    if (ocrMode) {
+        OcrScreen(vm, page.id, snackbar, onBack = { ocrMode = false })
         return
     }
 
@@ -255,6 +261,7 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
                 contentColor = MaterialTheme.colorScheme.inverseOnSurface
             ) {
                 Row(Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
+                    ActionButton("OCR", AppIcons.Ocr) { ocrMode = true }
                     ActionButton("Crop", AppIcons.Crop) { cropMode = true }
                     ActionButton("Rotate", Icons.Default.Refresh) { vm.rotateSelected() }
                     ActionButton("Delete", Icons.Default.Delete) { vm.removePage(vm.selectedPage) }

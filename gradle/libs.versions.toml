@@ -6,6 +6,7 @@ activityCompose = "1.9.3"
 composeBom = "2024.12.01"
 lifecycle = "2.8.7"
 camerax = "1.4.1"
+tess4android = "4.9.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -23,6 +24,7 @@ androidx-camera-core = { group = "androidx.camera", name = "camera-core", versio
 androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
 androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
 androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
+tesseract4android = { group = "com.github.adaptech-cz", name = "Tesseract4Android", version.ref = "tess4android" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

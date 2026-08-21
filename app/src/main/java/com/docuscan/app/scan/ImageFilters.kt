@@ -27,6 +27,7 @@ val FILTERS = listOf(
     FilterOption("vivid", "Vivid"),
     FilterOption("faded", "Faded"),
     FilterOption("crisp", "Crisp"),
+    FilterOption("sharpen", "Sharpen"),
     FilterOption("night", "Night"),
 )
 
@@ -174,6 +175,12 @@ fun applyFilter(src: Bitmap, filterId: String, brightness: Float, contrast: Floa
         if (pre !== src) pre.recycle()
         return b
     }
+    if (filterId == "sharpen") {
+        val sharp = sharpen(src)
+        val out = applyMatrixToBitmap(sharp, null, brightness, contrast)
+        if (out !== sharp && out !== src) sharp.recycle()
+        return out
+    }
     return applyMatrixToBitmap(src, baseMatrix(filterId), brightness, contrast)
 }
 
@@ -193,6 +200,44 @@ private fun applyMatrixToBitmap(src: Bitmap, base: ColorMatrix?, brightness: Flo
 
 private fun luminance(c: Int): Int =
     (((c shr 16) and 255) * 299 + ((c shr 8) and 255) * 587 + (c and 255) * 114 + 500) / 1000
+
+/** Spatial sharpen: classic 3x3 kernel (0,-1,0 / -1,9,-1 / 0,-1,0), edges kept as-is. */
+private fun sharpen(src: Bitmap): Bitmap {
+    val w = src.width
+    val h = src.height
+    val px = IntArray(w * h)
+    src.getPixels(px, 0, w, 0, 0, w, h)
+    val out = px.copyOf()
+    val kernel = intArrayOf(0, -1, 0, -1, 9, -1, 0, -1, 0)
+    for (y in 1 until h - 1) {
+        var i = y * w
+        for (x in 1 until w - 1) {
+            i++
+            var rr = 0
+            var gg = 0
+            var bb = 0
+            var ki = 0
+            for (ky in -1..1) {
+                var kx = -1
+                while (kx <= 1) {
+                    val k = kernel[ki++]
+                    val c = px[(y + ky) * w + x + kx]
+                    rr += ((c shr 16) and 255) * k
+                    gg += ((c shr 8) and 255) * k
+                    bb += (c and 255) * k
+                    kx++
+                }
+            }
+            out[i] = (0xFF000000.toInt()
+                or ((rr.coerceIn(0, 255)) shl 16)
+                or ((gg.coerceIn(0, 255)) shl 8)
+                or (bb.coerceIn(0, 255)))
+        }
+    }
+    val res = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    res.setPixels(out, 0, w, 0, 0, w, h)
+    return res
+}
 
 /** Real black & white: Otsu's method picks the optimal threshold from the luminance histogram. */
 private fun binarize(src: Bitmap): Bitmap {

@@ -20,6 +20,7 @@ object Exporter {
         val filteredPages = vm.pages.map {
             applyFilter(it.bitmap, it.filterId, it.brightness, it.contrast)
         }
+        val ocrTexts = vm.pages.map { it.ocrText }
         val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val base = "DocuScan_$ts"
 
@@ -29,7 +30,7 @@ object Exporter {
 
         if (format == "both" || format == "pdf") {
             val f = File(context.cacheDir, "$base.pdf")
-            f.outputStream().use { PdfExporter.createPdf(filteredPages, it) }
+            f.outputStream().use { PdfExporter.createPdf(filteredPages, it, ocrTexts) }
             shareFile = f
             pdfUri = MediaSaver.savePdf(context, f, "$base.pdf")
         }
@@ -50,8 +51,9 @@ object Exporter {
             val filteredPages = vm.pages.map {
                 applyFilter(it.bitmap, it.filterId, it.brightness, it.contrast)
             }
+            val ocrTexts = vm.pages.map { it.ocrText }
             val f = File(context.cacheDir, "share_${System.currentTimeMillis()}.pdf")
-            f.outputStream().use { PdfExporter.createPdf(filteredPages, it) }
+            f.outputStream().use { PdfExporter.createPdf(filteredPages, it, ocrTexts) }
             f
         } catch (e: Exception) {
             null

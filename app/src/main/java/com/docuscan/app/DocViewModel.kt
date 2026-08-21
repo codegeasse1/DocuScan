@@ -13,6 +13,13 @@ import com.docuscan.app.data.AppSettings
 import com.docuscan.app.data.DocRecord
 import com.docuscan.app.data.HistoryStore
 import com.docuscan.app.scan.BitmapUtil
+import com.docuscan.app.scan.Ocr
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
 
 sealed class Screen {
@@ -28,7 +35,9 @@ data class ScannedPage(
     val bitmap: Bitmap,
     val filterId: String = "original",
     val brightness: Float = 0f,
-    val contrast: Float = 1f
+    val contrast: Float = 1f,
+    val ocrText: String? = null,
+    val ocrBusy: Boolean = false
 )
 
 class DocViewModel(app: Application) : AndroidViewModel(app) {
@@ -36,6 +45,7 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
     private val context get() = getApplication<Application>()
     private val store = HistoryStore(context)
     private val idCounter = AtomicLong(System.currentTimeMillis())
+    private val vmScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     var tab by mutableStateOf(Tab.Home)
         private set
@@ -138,6 +148,39 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
     fun resetAdjustments() {
         val i = selectedPage
         if (i in pages.indices) pages[i] = pages[i].copy(brightness = 0f, contrast = 1f)
+    }
+
+    /** Runs OCR on one page (only when the user asks; never automatically). */
+    fun runOcr(pageId: Long, force: Boolean = false) {
+        val i = pages.indexOfFirst { it.id == pageId }
+        if (i !in pages.indices) return
+        val p = pages[i]
+        if (p.ocrBusy || (!force && !p.ocrText.isNullOrBlank())) return
+        pages[i] = p.copy(ocrBusy = true, ocrText = if (force) null else p.ocrText)
+        vmScope.launch {
+            val text = withContext(Dispatchers.IO) { Ocr.recognize(context, p.bitmap) }
+            val j = pages.indexOfFirst { it.id == pageId }
+            if (j in pages.indices) {
+                val cur = pages[j]
+                pages[j] = cur.copy(ocrText = text, ocrBusy = false)
+            }
+        }
+    }
+
+    /** OCRs every page that doesn't have text yet. */
+    fun runOcrAll() {
+        val targets = pages.filter { !it.ocrBusy && it.ocrText.isNullOrBlank() }.map { it.id }
+        for (id in targets) runOcr(id)
+    }
+
+    fun setOcrText(pageId: Long, text: String?) {
+        val i = pages.indexOfFirst { it.id == pageId }
+        if (i in pages.indices) pages[i] = pages[i].copy(ocrText = text)
+    }
+
+    override fun onCleared() {
+        vmScope.cancel()
+        super.onCleared()
     }
 
     fun updateSettings(s: AppSettings) {
