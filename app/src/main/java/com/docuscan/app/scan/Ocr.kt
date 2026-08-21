@@ -2,7 +2,7 @@ package com.docuscan.app.scan
 
 import android.content.Context
 import android.graphics.Bitmap
-import cz.adaptech.tesseract4android.TessBaseAPI
+import com.googlecode.tesseract.android.TessBaseAPI
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.locks.ReentrantLock

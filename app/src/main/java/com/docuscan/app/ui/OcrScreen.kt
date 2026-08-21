@@ -26,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.docuscan.app.DocViewModel
+import kotlinx.coroutines.launch
 
 /**
  * OCR review screen. OCR is opt-in: it only starts when the user opens this
@@ -50,6 +52,7 @@ fun OcrScreen(vm: DocViewModel, pageId: Long, snackbar: SnackbarHostState, onBac
 
     var text by remember(pageId, page.ocrText, page.ocrBusy) { mutableStateOf(page.ocrText ?: "") }
     var initialRunDone by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         if (!initialRunDone && page.ocrText.isNullOrBlank() && !page.ocrBusy) {
@@ -127,7 +130,7 @@ fun OcrScreen(vm: DocViewModel, pageId: Long, snackbar: SnackbarHostState, onBac
                 TextButton(onClick = {
                     val cm = context.getSystemService(ClipboardManager::class.java)
                     cm.setPrimaryClip(ClipData.newPlainText("OCR", text))
-                    snackbar.showSnackbar("Copied to clipboard")
+                    scope.launch { snackbar.showSnackbar("Copied to clipboard") }
                 }) { Text("Copy") }
                 TextButton(onClick = {
                     val send = Intent(Intent.ACTION_SEND).apply {
