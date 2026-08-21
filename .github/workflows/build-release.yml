@@ -53,7 +53,10 @@ jobs:
         id: version
         shell: bash
         run: |
-          CODE="$(( $(date +%Y) * 100000 + $(date +%m) * 1000 + $(date +%d) * 10 + (GITHUB_RUN_NUMBER % 10) ))"
+          Y=$(date +%Y)
+          M=$(date +%-m)
+          D=$(date +%-d)
+          CODE="$(( Y * 100000 + M * 1000 + D * 10 + (GITHUB_RUN_NUMBER % 10) ))"
           echo "version_code=$CODE" >> "$GITHUB_OUTPUT"
           echo "version_name=1.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
           echo "tag=v1.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
