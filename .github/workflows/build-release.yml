@@ -69,7 +69,57 @@ jobs:
           RELEASE_STORE_FILE: keystore/release.jks
           RELEASE_STORE_PASSWORD: "${{ secrets.RELEASE_STORE_PASSWORD }}"
           RELEASE_KEY_PASSWORD: "${{ secrets.RELEASE_KEY_PASSWORD }}"
-        run: ./gradlew :app:assembleRelease --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew :app:assembleRelease --stacktrace 2>&1 | tee /tmp/gradle.log
+
+      - name: Report build failure as issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "Run: ${{ github.run_number }} — commit ${{ github.sha }}"
+            echo ""
+            echo "```"
+            tail -c 12000 /tmp/gradle.log | tr '\r' '\n' | grep -vE '^[[:space:]]*
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "${{ steps.version.outputs.tag }}"
+          name: "DocuScan ${{ steps.version.outputs.version_name }}"
+          body: |
+            Auto-built from `main`.
+
+            - Build: `${{ github.run_number }}`
+            - Commit: `${{ github.sha }}`
+          files: app/build/outputs/apk/release/app-release.apk
+          fail_on_unmatched_files: true
+          make_latest: true
+ | tail -n 160
+            echo "```"
+          } > /tmp/issue.md
+          python3 - <<'EOF'
+          import json, os, urllib.request
+          body = open('/tmp/issue.md', encoding='utf-8', errors='replace').read()
+          data = json.dumps({
+              "title": "Build failure (run " + os.environ.get("GITHUB_RUN_NUMBER", "?") + ")",
+              "body": body
+          }).encode()
+          req = urllib.request.Request(
+              "https://api.github.com/repos/" + os.environ["GITHUB_REPOSITORY"] + "/issues",
+              data=data, method="POST",
+              headers={
+                  "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                  "Accept": "application/vnd.github+json",
+                  "User-Agent": "docuscan"
+              })
+          try:
+              urllib.request.urlopen(req)
+          except Exception as e:
+              print("issue post failed:", e)
+          EOF
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
