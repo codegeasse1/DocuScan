@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -62,6 +63,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.docuscan.app.DocViewModel
+import com.docuscan.app.scan.AutoCrop
 import com.docuscan.app.scan.BitmapUtil
 import com.docuscan.app.scan.Exporter
 import com.docuscan.app.scan.FILTERS
@@ -85,6 +87,7 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
     var jpgOptions by remember { mutableStateOf(false) }
     var addDialog by remember { mutableStateOf(false) }
     var discardDialog by remember { mutableStateOf(false) }
+    var autoCropping by remember { mutableStateOf(false) }
 
     val galleryLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -103,8 +106,15 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
         return
     }
 
-    val filtered = remember(page.id, page.filterId, page.brightness, page.contrast) {
-        applyFilter(page.bitmap, page.filterId, page.brightness, page.contrast)
+    var filtered by remember(page.id, page.filterId, page.brightness, page.contrast) {
+        mutableStateOf<Bitmap?>(null)
+    }
+    LaunchedEffect(page.id, page.filterId, page.brightness, page.contrast) {
+        // Filters (esp. the OpenCV cleanup presets) run off the main thread so the UI stays smooth.
+        filtered = null
+        filtered = withContext(Dispatchers.Default) {
+            applyFilter(page.bitmap, page.filterId, page.brightness, page.contrast)
+        }
     }
 
     fun doExport(format: String) {
@@ -134,6 +144,21 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
         scope.launch {
             val f = withContext(Dispatchers.IO) { Exporter.makePdf(context, vm) }
             if (f != null) ShareUtil.shareFile(context, f, "application/pdf")
+        }
+    }
+
+    fun autoCrop() {
+        if (autoCropping) return
+        autoCropping = true
+        scope.launch {
+            val pts = withContext(Dispatchers.IO) { AutoCrop.detectCorners(page.bitmap) }
+            autoCropping = false
+            if (pts != null) {
+                vm.replaceSelected(BitmapUtil.perspectiveWarp(page.bitmap, pts))
+                snackbar.showSnackbar("Auto-cropped to the detected page")
+            } else {
+                snackbar.showSnackbar("Couldn't find a page — use Crop")
+            }
         }
     }
 
@@ -209,6 +234,10 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
         )
     }
 
+    if (autoCropping) {
+        LoadingOverlay("Detecting page corners…")
+    }
+
     if (exporting) {
         LoadingOverlay("Exporting…")
     }
@@ -267,14 +296,21 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
                 .weight(1f)
                 .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
-            Image(
-                bitmap = filtered.asImageBitmap(),
-                contentDescription = "Scanned page",
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(8.dp),
-                contentScale = ContentScale.Fit
-            )
+            val f = filtered
+            if (f != null) {
+                Image(
+                    bitmap = f.asImageBitmap(),
+                    contentDescription = "Scanned page",
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(8.dp),
+                    contentScale = ContentScale.Fit
+                )
+            } else {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            }
             // Action pill overlay
             Surface(
                 modifier = Modifier
@@ -286,6 +322,7 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
             ) {
                 Row(Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
                     ActionButton("OCR", AppIcons.Ocr) { ocrMode = true }
+                    ActionButton("AutoCrop", AppIcons.Crop) { autoCrop() }
                     ActionButton("Crop", AppIcons.Crop) { cropMode = true }
                     ActionButton("Rotate", Icons.Default.Refresh) { vm.rotateSelected() }
                     ActionButton("Delete", Icons.Default.Delete) { vm.removePage(vm.selectedPage) }

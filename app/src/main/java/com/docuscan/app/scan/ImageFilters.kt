@@ -11,6 +11,9 @@ data class FilterOption(val id: String, val label: String)
 
 val FILTERS = listOf(
     FilterOption("original", "Original"),
+    FilterOption("natural", "Natural"),
+    FilterOption("enhanced", "Enhanced"),
+    FilterOption("cleantext", "Clean Text"),
     FilterOption("magic", "Magic"),
     FilterOption("bw", "B&W"),
     FilterOption("gray", "Gray"),
@@ -180,6 +183,9 @@ fun applyFilter(src: Bitmap, filterId: String, brightness: Float, contrast: Floa
         val out = applyMatrixToBitmap(sharp, null, brightness, contrast)
         if (out !== sharp && out !== src) sharp.recycle()
         return out
+    }
+    if (filterId == "natural" || filterId == "enhanced" || filterId == "cleantext") {
+        return Cleanup.apply(src, filterId)
     }
     return applyMatrixToBitmap(src, baseMatrix(filterId), brightness, contrast)
 }

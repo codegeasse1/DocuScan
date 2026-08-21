@@ -59,6 +59,11 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
         jniLibs {
+            // Keep the APK lean: drop x86/x86_64 native libraries (negligible device share).
+            excludes += setOf(
+                "lib/x86/**",
+                "lib/x86_64/**"
+            )
             pickFirsts += setOf(
                 "**/libjpeg.so",
                 "**/libpng.so",
@@ -88,5 +93,6 @@ dependencies {
     implementation(libs.androidx.camera.view)
     implementation(libs.tesseract4android)
     implementation(libs.androidx.documentfile)
+    implementation(libs.opencv)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

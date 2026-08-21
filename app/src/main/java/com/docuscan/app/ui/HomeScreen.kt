@@ -188,7 +188,7 @@ fun HomeScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
                 )
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    "Auto-crop detects the page edges. 12+ filters, brightness & contrast, " +
+                    "Auto-crop detects the page edges. 22 filters (incl. MakeACopy's Enhanced), brightness & contrast, " +
                         "multi-page documents and one-tap PDF or JPG export.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

@@ -43,8 +43,16 @@ object AutoCrop {
     private val DX = intArrayOf(1, -1, 0, 0)
     private val DY = intArrayOf(0, 0, 1, -1)
 
-    /** Detect page corners in [src] image space. Result order: TL, TR, BR, BL. */
+    /**
+     * Detect page corners in [src] image space. Result order: TL, TR, BR, BL.
+     * Tries the MakeACopy OpenCV pipeline first, then the built-in detector.
+     */
     fun detectCorners(src: Bitmap): List<PointF>? {
+        Cleanup.detectCorners(src)?.let { return it }
+        return detectCornersJava(src)
+    }
+
+    private fun detectCornersJava(src: Bitmap): List<PointF>? {
         val w0 = src.width
         val h0 = src.height
         if (w0 < 24 || h0 < 24) return null

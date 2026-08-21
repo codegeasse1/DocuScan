@@ -12,11 +12,13 @@ Built with **Kotlin + Jetpack Compose (Material 3) + CameraX**, modeled after th
 - 🧭 **Manual perspective crop** — drag the four corners, output is deskewed via perspective warp
 - 🎯 **Auto-align crop frame** — one tap aligns the crop guides to the detected page corners; nothing is cropped until you tap **Crop**, and you can still drag any corner afterwards to fine-tune
 - ✂️ **Smart corner detection** — real corner-detection finds the page's four corners (works on a photo of a page lying on a bed, desk, or any background)
+- ✨ **MakeACopy document cleanup** — the same OpenCV presets: **Natural**, **Enhanced** and **Clean Text** (background flattening, CLAHE local contrast, OCR-grade clean-up), on top of the 19 classic filters
+- ⚡ **One-tap Auto crop** — detect the page and perspective-warp to it instantly (OpenCV contour pipeline with Hough fallback, same as MakeACopy)
 - 🔤 **OCR (opt-in, like MakeACopy's Tesseract flavor)** — fully offline text recognition (Tesseract 4). Nothing is OCR'd automatically: tap **OCR** in the editor to review and correct the text
 - 🔍 **Word-level OCR review** — every word is shown with its confidence (green/amber/red); tap a word to fix it, get dictionary suggestions, or re-run OCR on just that word
 - 📖 **OCR dictionary** — frequency-word list suggests corrections for low-confidence words
 - 🌐 **OCR languages** — English bundled; import more `.traineddata` language packs (e.g. from tessdata_fast) via Settings or the OCR screen
-- 🎨 **19 filters** — Original, Magic, B&W (real Otsu threshold binarization), Grayscale, Sepia, Polaroid, Vintage, Soft, Warm, Cool, Ocean, Rose, Blue, Invert, Vivid, Faded, Crisp, Sharpen, Night
+- 🎨 **22 filters** — Original, Natural, Enhanced, Clean Text, Magic, B&W (real Otsu threshold binarization), Grayscale, Sepia, Polaroid, Vintage, Soft, Warm, Cool, Ocean, Rose, Blue, Invert, Vivid, Faded, Crisp, Sharpen, Night
 - 🔆 **Brightness & contrast** sliders
 - 📚 **Multi-page documents** — add/remove/reorder pages
 - 📄 **Export** — multi-page A4 PDF (searchable when OCR text exists), JPG with **configurable quality + color/B&W**, or plain **TXT**
@@ -57,8 +59,9 @@ app/src/main/java/com/docuscan/app/
 ├── A11y.kt                # Accessibility Mode: TTS + haptics
 ├── DocViewModel.kt        # Shared state (pages, settings, history, OCR)
 ├── scan/                  # The engine
-│   ├── AutoCrop.kt        # Corner detection: gradient thresholds, components, hull -> quad
-│   ├── ImageFilters.kt    # 19 color-matrix filters + Otsu B&W + spatial sharpen
+│   ├── AutoCrop.kt        # Corner detection (OpenCV first, built-in fallback) -> quad
+│   ├── Cleanup.kt         # OpenCV document cleanup (Natural/Enhanced/Clean Text) + corner detector
+│   ├── ImageFilters.kt    # 22 filters (incl. MakeACopy cleanup presets) + Otsu B&W + sharpen
 │   ├── Ocr.kt             # Offline Tesseract OCR: word-level boxes + confidences, language packs
 │   ├── Dictionary.kt      # Frequency-word dictionary for OCR suggestions
 │   ├── PdfImport.kt       # PdfRenderer -> page bitmaps
