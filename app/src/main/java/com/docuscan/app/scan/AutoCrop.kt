@@ -334,7 +334,7 @@ object AutoCrop {
     private fun simplifyRing(pts: List<Pt>, eps: Double): List<Pt> {
         if (pts.size <= 8) return pts
         var bi = intArrayOf(0, 0)
-        var bd = -1.0
+        var bd = -1f
         for (i in pts.indices) for (j in i + 1 until pts.size) {
             val dx = pts[i].x - pts[j].x
             val dy = pts[i].y - pts[j].y
@@ -375,8 +375,8 @@ object AutoCrop {
 
     private fun orderCorners(pts: List<Pt>): List<Pt> {
         if (pts.size != 4) return pts
-        val cx = pts.sumOf { it.x } / 4f
-        val cy = pts.sumOf { it.y } / 4f
+        val cx = pts.map { it.x }.sum() / 4f
+        val cy = pts.map { it.y }.sum() / 4f
         val ang = pts.map { atan2(it.y - cy, it.x - cx) }
         val idx = (0..3).sortedBy { ang[it] }
         val quad = idx.map { pts[it] }
