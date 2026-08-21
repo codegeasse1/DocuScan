@@ -82,6 +82,7 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
     var showAdjust by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
     var saveMenu by remember { mutableStateOf(false) }
+    var jpgOptions by remember { mutableStateOf(false) }
     var addDialog by remember { mutableStateOf(false) }
     var discardDialog by remember { mutableStateOf(false) }
 
@@ -111,13 +112,19 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
         scope.launch {
             val res = withContext(Dispatchers.IO) { Exporter.run(context, vm, format) }
             exporting = false
-            val where = if (format == "jpg") "Pictures/DocuScan" else "Download/DocuScan"
+            val where = when (format) {
+                "jpg" -> "Pictures/DocuScan"
+                "txt" -> "Download/DocuScan"
+                else -> "Download/DocuScan"
+            }
             val what = when (format) {
                 "both" -> "PDF + JPGs"
                 "pdf" -> "PDF"
-                else -> "JPGs"
+                "jpg" -> "JPGs"
+                else -> "Text"
             }
-            snackbar.showSnackbar("Saved $what to $where")
+            val inbox = if (vm.settings.inboxEnabled) " + inbox" else ""
+            snackbar.showSnackbar("Saved $what to $where$inbox")
             vm.newDoc()
             vm.selectTab(com.docuscan.app.Tab.Documents)
         }
@@ -194,6 +201,14 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
         )
     }
 
+    if (jpgOptions) {
+        JpgOptionsDialog(
+            vm = vm,
+            onExport = { jpgOptions = false; doExport("jpg") },
+            onDismiss = { jpgOptions = false }
+        )
+    }
+
     if (exporting) {
         LoadingOverlay("Exporting…")
     }
@@ -232,6 +247,15 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
                     DropdownMenuItem(text = { Text("Save PDF + JPG") }, onClick = { saveMenu = false; doExport("both") })
                     DropdownMenuItem(text = { Text("Save as PDF") }, onClick = { saveMenu = false; doExport("pdf") })
                     DropdownMenuItem(text = { Text("Save as JPG") }, onClick = { saveMenu = false; doExport("jpg") })
+                    DropdownMenuItem(
+                        text = { Text("Save JPG (options…)") },
+                        onClick = { saveMenu = false; jpgOptions = true }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Save as text (TXT)") },
+                        enabled = vm.pages.any { !it.ocrText.isNullOrBlank() },
+                        onClick = { saveMenu = false; doExport("txt") }
+                    )
                 }
             }
         }
@@ -425,3 +449,43 @@ private fun AddPageTile(onClick: () -> Unit) {
 private fun Modifier.androidClickable(onClick: () -> Unit): Modifier = this.then(
     clickable(onClick = onClick)
 )
+
+@Composable
+private fun JpgOptionsDialog(vm: DocViewModel, onExport: () -> Unit, onDismiss: () -> Unit) {
+    val s = vm.settings
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("JPG export options") },
+        text = {
+            Column {
+                Text("Quality", style = MaterialTheme.typography.labelMedium)
+                Slider(
+                    value = s.jpegQuality.toFloat(),
+                    onValueChange = { vm.updateSettings(s.copy(jpegQuality = it.toInt())) },
+                    valueRange = 50f..100f
+                )
+                Text(
+                    "${s.jpegQuality}%",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(10.dp))
+                Row {
+                    FilterChip(
+                        selected = s.jpegColor,
+                        onClick = { vm.updateSettings(s.copy(jpegColor = true)) },
+                        label = { Text("Color") }
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    FilterChip(
+                        selected = !s.jpegColor,
+                        onClick = { vm.updateSettings(s.copy(jpegColor = false)) },
+                        label = { Text("Black & white") }
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onExport) { Text("Export") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}

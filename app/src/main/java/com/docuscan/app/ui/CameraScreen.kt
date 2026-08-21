@@ -46,9 +46,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.docuscan.app.A11y
 import com.docuscan.app.DocViewModel
 import com.docuscan.app.scan.BitmapUtil
 import kotlinx.coroutines.launch
@@ -58,6 +60,7 @@ import java.util.concurrent.Executors
 fun CameraScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val view = LocalView.current
 
     var hasPermission by remember {
         mutableStateOf(
@@ -132,6 +135,7 @@ fun CameraScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
     fun capture() {
         if (capturing) return
         capturing = true
+        A11y.buzz(view)
         imageCapture.flashMode = if (flashOn) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF
         imageCapture.takePicture(executor, object : ImageCapture.OnImageCapturedCallback() {
             override fun onCaptureSuccess(image: ImageProxy) {
@@ -143,6 +147,7 @@ fun CameraScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
                 val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                 val rotated = if (decoded != null && rot != 0) BitmapUtil.rotate(decoded, rot) else decoded
                 if (rotated != null) {
+                    A11y.speak("Document scanned")
                     mainExecutor.execute {
                         capturing = false
                         vm.addBitmap(rotated)
@@ -156,6 +161,7 @@ fun CameraScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
             }
 
             override fun onError(exception: ImageCaptureException) {
+                A11y.speak("Capture failed")
                 mainExecutor.execute {
                     capturing = false
                     scope.launch { snackbar.showSnackbar("Capture failed") }
@@ -173,6 +179,19 @@ fun CameraScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
         onDispose {
             providerRef.value?.unbindAll()
             executor.shutdown()
+        }
+    }
+
+    // Accessibility Mode: volume keys become the shutter, with spoken/haptic feedback.
+    DisposableEffect(Unit) {
+        A11y.captureHandler = { capture() }
+        A11y.active = vm.settings.accessibilityEnabled
+        if (vm.settings.accessibilityEnabled) {
+            A11y.speak("Camera open. Press the volume button to capture.")
+        }
+        onDispose {
+            A11y.active = false
+            A11y.captureHandler = null
         }
     }
 

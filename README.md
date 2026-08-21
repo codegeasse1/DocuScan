@@ -1,23 +1,29 @@
 # DocuScan 📄
 
-A modern, local-first Android document scanner. Capture or import images, auto-align crop guides to the detected page corners, apply 19 filters, run on-device OCR, and export as searchable PDF or JPG.
+A modern, local-first Android document scanner. Capture or import images, auto-align crop guides to the detected page corners, apply 19 filters, run on-device opt-in OCR with word-level review, and export as searchable PDF, JPG, or TXT.
 
-Built with **Kotlin + Jetpack Compose (Material 3) + CameraX**.
+Built with **Kotlin + Jetpack Compose (Material 3) + CameraX**, modeled after the MakeACopy feature set.
 
 ## Features
 
 - 📷 **Camera capture** with in-app preview, flash & front/back flip (CameraX)
 - 🖼️ **Gallery import** (system photo picker — no storage permissions needed)
+- 📄 **PDF import** — open an existing PDF and its pages become editable pages
 - 🧭 **Manual perspective crop** — drag the four corners, output is deskewed via perspective warp
 - 🎯 **Auto-align crop frame** — one tap aligns the crop guides to the detected page corners; nothing is cropped until you tap **Crop**, and you can still drag any corner afterwards to fine-tune
-- ✂️ **Smart corner detection** — real corner-detection finds the page's four corners (works on a photo of a page lying on a bed, desk, or any background), so photos that are *not* of a page are never touched
-- 🔤 **OCR (opt-in)** — fully offline text recognition (Tesseract 4, English). Nothing is OCR'd automatically: tap **OCR** in the editor, review/correct the text, and the recognized text becomes a searchable layer in exported PDFs
+- ✂️ **Smart corner detection** — real corner-detection finds the page's four corners (works on a photo of a page lying on a bed, desk, or any background)
+- 🔤 **OCR (opt-in, like MakeACopy's Tesseract flavor)** — fully offline text recognition (Tesseract 4). Nothing is OCR'd automatically: tap **OCR** in the editor to review and correct the text
+- 🔍 **Word-level OCR review** — every word is shown with its confidence (green/amber/red); tap a word to fix it, get dictionary suggestions, or re-run OCR on just that word
+- 📖 **OCR dictionary** — frequency-word list suggests corrections for low-confidence words
+- 🌐 **OCR languages** — English bundled; import more `.traineddata` language packs (e.g. from tessdata_fast) via Settings or the OCR screen
 - 🎨 **19 filters** — Original, Magic, B&W (real Otsu threshold binarization), Grayscale, Sepia, Polaroid, Vintage, Soft, Warm, Cool, Ocean, Rose, Blue, Invert, Vivid, Faded, Crisp, Sharpen, Night
 - 🔆 **Brightness & contrast** sliders
 - 📚 **Multi-page documents** — add/remove/reorder pages
-- 📄 **Export to PDF** (multi-page, A4, searchable when OCR text exists) and/or **JPG** — saved to `Pictures/DocuScan` / `Download/DocuScan` via MediaStore
+- 📄 **Export** — multi-page A4 PDF (searchable when OCR text exists), JPG with **configurable quality + color/B&W**, or plain **TXT**
+- 📨 **Inbox Mode** — pick a folder (SAF) and every export is automatically saved there too — great for paperless-ngx / Syncthing / Nextcloud workflows
+- ♿ **Accessibility Mode** — spoken + haptic feedback and volume-key shutter in the camera
 - 📤 **Share** with one tap (PDF or JPG)
-- 🗂️ **Document history** — browse, view, re-share or delete past scans
+- 🗂️ **Document library** — browse, view, re-share or delete past scans, with **search over titles and OCR text**
 - 📨 **Share-to-scan** — open an image from any app with "Send to DocuScan"
 - 🌙 **Modern Material 3 UI**, light/dark/system theme
 
@@ -46,23 +52,31 @@ Or just open the repo in Android Studio and press Run.
 
 ```
 app/src/main/java/com/docuscan/app/
-├── MainActivity.kt        # Compose entry point
+├── MainActivity.kt        # Compose entry point + volume-key shutter (A11y)
 ├── App.kt                 # Navigation + bottom bar
-├── DocViewModel.kt        # Shared state (pages, settings, history)
+├── A11y.kt                # Accessibility Mode: TTS + haptics
+├── DocViewModel.kt        # Shared state (pages, settings, history, OCR)
 ├── scan/                  # The engine
 │   ├── AutoCrop.kt        # Corner detection: gradient thresholds, components, hull -> quad
 │   ├── ImageFilters.kt    # 19 color-matrix filters + Otsu B&W + spatial sharpen
-│   ├── Ocr.kt             # Offline Tesseract OCR (opt-in, English traineddata in assets)
+│   ├── Ocr.kt             # Offline Tesseract OCR: word-level boxes + confidences, language packs
+│   ├── Dictionary.kt      # Frequency-word dictionary for OCR suggestions
+│   ├── PdfImport.kt       # PdfRenderer -> page bitmaps
 │   ├── BitmapUtil.kt      # Rotate/crop/perspective-warp/EXIF
-│   ├── PdfExporter.kt     # android.graphics.pdf PDF writer
-│   ├── MediaSaver.kt      # MediaStore saves
-│   └── Exporter.kt        # Export pipeline
+│   ├── PdfExporter.kt     # android.graphics.pdf PDF writer (searchable text layer)
+│   ├── MediaSaver.kt      # MediaStore saves + inbox folder writes
+│   └── Exporter.kt        # Export pipeline (PDF/JPG/TXT + inbox mirror)
 ├── data/                  # History + settings persistence
-├── ui/                    # Screens (Home, Camera, Editor, Crop, OCR, Documents, Settings)
+├── ui/                    # Screens (Home, Camera, Editor, Crop, OCR review, Documents, Settings)
 └── util/ShareUtil.kt      # Sharing via FileProvider
 ```
 
-`app/src/main/assets/tessdata/` bundles the English OCR model (`eng.traineddata`, tessdata_fast), copied to private storage on first use.
+`app/src/main/assets/tessdata/` bundles the English OCR model (`eng.traineddata`, tessdata_fast), copied to private storage on first use. `app/src/main/assets/words/` bundles the English frequency word list used for OCR suggestions.
+
+## Third-party licenses
+
+- **Tesseract4Android** (Apache 2.0) and **tessdata_fast** `eng.traineddata` (Apache 2.0) — offline OCR.
+- **Word frequency data**: ["Word Frequency" by Hermit Dave](https://github.com/hermitdave/FrequencyWords) (CC BY-SA 4.0) — used for OCR suggestions, like MakeACopy.
 
 ## License
 

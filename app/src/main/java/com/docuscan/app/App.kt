@@ -59,7 +59,7 @@ fun App(vm: DocViewModel = viewModel()) {
                         when (vm.tab) {
                             Tab.Home -> HomeScreen(vm, snackbarHostState)
                             Tab.Documents -> DocumentsScreen(vm, snackbarHostState)
-                            Tab.Settings -> SettingsScreen(vm)
+                            Tab.Settings -> SettingsScreen(vm, snackbarHostState)
                         }
                     }
                 }

@@ -12,7 +12,8 @@ data class DocRecord(
     val pageCount: Int,
     val format: String,
     val pdfUri: String?,
-    val jpgUris: List<String>
+    val jpgUris: List<String>,
+    val searchText: String = ""
 )
 
 class HistoryStore(context: Context) {
@@ -37,7 +38,8 @@ class HistoryStore(context: Context) {
                         o.getInt("pageCount"),
                         o.getString("format"),
                         if (o.has("pdfUri")) o.getString("pdfUri") else null,
-                        pages
+                        pages,
+                        o.optString("searchText", "")
                     )
                 )
             }
@@ -69,6 +71,7 @@ class HistoryStore(context: Context) {
                         put("format", r.format)
                         put("pdfUri", r.pdfUri)
                         put("jpgUris", JSONArray(r.jpgUris))
+                        put("searchText", r.searchText)
                     }
                 )
             }

@@ -31,6 +31,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -65,7 +66,15 @@ fun DocumentsScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
     LaunchedEffect(Unit) { vm.refreshDocs() }
 
     var viewing by remember { mutableStateOf<DocRecord?>(null) }
-    val docs = vm.docs
+    var query by remember { mutableStateOf("") }
+    val docs = if (query.isBlank()) {
+        vm.docs
+    } else {
+        val q = query.trim()
+        vm.docs.filter {
+            it.title.contains(q, ignoreCase = true) || it.searchText.contains(q, ignoreCase = true)
+        }
+    }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text(
@@ -74,6 +83,14 @@ fun DocumentsScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = 12.dp)
         )
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            placeholder = { Text("Search titles and OCR text…") }
+        )
+        Spacer(Modifier.height(12.dp))
         if (docs.isEmpty()) {
             EmptyState(
                 Icons.Default.DateRange,

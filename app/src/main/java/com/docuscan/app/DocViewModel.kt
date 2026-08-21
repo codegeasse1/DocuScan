@@ -2,6 +2,7 @@ package com.docuscan.app
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.graphics.RectF
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -14,6 +15,7 @@ import com.docuscan.app.data.DocRecord
 import com.docuscan.app.data.HistoryStore
 import com.docuscan.app.scan.BitmapUtil
 import com.docuscan.app.scan.Ocr
+import com.docuscan.app.scan.Word
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -37,6 +39,7 @@ data class ScannedPage(
     val brightness: Float = 0f,
     val contrast: Float = 1f,
     val ocrText: String? = null,
+    val ocrWords: List<Word>? = null,
     val ocrBusy: Boolean = false
 )
 
@@ -70,6 +73,8 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
         docs = store.load()
     }
 
+    val ocrLangs: List<String> get() = Ocr.availableLanguages(context)
+
     fun selectTab(t: Tab) {
         tab = t
         screen = Screen.Tabs
@@ -90,6 +95,18 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
         // Images are never cropped automatically - the user crops (or auto-aligns
         // the crop frame) in the editor, so nothing is lost on import.
         pages.add(ScannedPage(idCounter.incrementAndGet(), b, settings.defaultFilter))
+        selectedPage = pages.size - 1
+        screen = Screen.Editor
+    }
+
+    /** Adds several bitmaps at once (e.g. pages of an imported PDF). */
+    fun addPdfPages(bitmaps: List<Bitmap>) {
+        if (bitmaps.isEmpty()) return
+        for (raw in bitmaps) {
+            var b = BitmapUtil.fitMax(raw, 2400)
+            if (b !== raw) raw.recycle()
+            pages.add(ScannedPage(idCounter.incrementAndGet(), b, settings.defaultFilter))
+        }
         selectedPage = pages.size - 1
         screen = Screen.Editor
     }
@@ -156,13 +173,22 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
         if (i !in pages.indices) return
         val p = pages[i]
         if (p.ocrBusy || (!force && !p.ocrText.isNullOrBlank())) return
-        pages[i] = p.copy(ocrBusy = true, ocrText = if (force) null else p.ocrText)
+        pages[i] = p.copy(
+            ocrBusy = true,
+            ocrText = if (force) null else p.ocrText,
+            ocrWords = if (force) null else p.ocrWords
+        )
+        val lang = settings.ocrLang
         vmScope.launch {
-            val text = withContext(Dispatchers.IO) { Ocr.recognize(context, p.bitmap) }
+            val res = withContext(Dispatchers.IO) { Ocr.recognizeWithWords(context, p.bitmap, lang) }
             val j = pages.indexOfFirst { it.id == pageId }
             if (j in pages.indices) {
                 val cur = pages[j]
-                pages[j] = cur.copy(ocrText = text, ocrBusy = false)
+                pages[j] = cur.copy(
+                    ocrText = res?.text,
+                    ocrWords = res?.words,
+                    ocrBusy = false
+                )
             }
         }
     }
@@ -173,10 +199,66 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
         for (id in targets) runOcr(id)
     }
 
+    /** Re-runs OCR on a single word's region (normalized bounds). */
+    fun reOcrWord(pageId: Long, wordIndex: Int) {
+        val i = pages.indexOfFirst { it.id == pageId }
+        if (i !in pages.indices) return
+        val p = pages[i]
+        val w = p.ocrWords?.getOrNull(wordIndex) ?: return
+        val norm = RectF(w.left, w.top, w.right, w.bottom)
+        val lang = settings.ocrLang
+        vmScope.launch {
+            val newText = withContext(Dispatchers.IO) {
+                Ocr.recognizeRegion(context, p.bitmap, norm, lang)
+            }
+            val j = pages.indexOfFirst { it.id == pageId }
+            if (j in pages.indices) {
+                val cur = pages[j]
+                val words = cur.ocrWords?.toMutableList() ?: return@launch
+                if (wordIndex in words.indices) {
+                    val newTextClean = newText?.trim()
+                    words[wordIndex] = if (newTextClean.isNullOrBlank()) {
+                        words[wordIndex].copy(confidence = 10f)
+                    } else {
+                        words[wordIndex].copy(text = newTextClean, confidence = 95f)
+                    }
+                    pages[j] = cur.copy(ocrWords = words, ocrText = Ocr.buildText(words))
+                }
+            }
+        }
+    }
+
+    /** Replaces a word's text after manual editing in the OCR review. */
+    fun setWordText(pageId: Long, wordIndex: Int, newText: String) {
+        val i = pages.indexOfFirst { it.id == pageId }
+        if (i !in pages.indices) return
+        val p = pages[i]
+        val words = p.ocrWords ?: return
+        if (wordIndex !in words.indices) return
+        val clean = newText.trim()
+        val nw = words.toMutableList()
+        val cur = nw[wordIndex]
+        nw[wordIndex] = if (clean.isEmpty()) {
+            cur.copy(text = " ", confidence = 100f)
+        } else {
+            cur.copy(text = clean, confidence = 100f)
+        }
+        pages[i] = p.copy(ocrWords = nw, ocrText = Ocr.buildText(nw))
+    }
+
     fun setOcrText(pageId: Long, text: String?) {
         val i = pages.indexOfFirst { it.id == pageId }
         if (i in pages.indices) pages[i] = pages[i].copy(ocrText = text)
     }
+
+    fun setOcrLang(lang: String) {
+        updateSettings(settings.copy(ocrLang = lang))
+        val p = pages.getOrNull(selectedPage)
+        if (p != null) runOcr(p.id, force = true)
+    }
+
+    /** Imports a user-picked .traineddata language pack; returns its code. */
+    fun importOcrLang(uri: Uri): String? = Ocr.importTrainedData(context, uri)
 
     override fun onCleared() {
         vmScope.cancel()
@@ -188,7 +270,14 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
         s.save(context)
     }
 
-    fun addHistory(title: String, pageCount: Int, format: String, pdfUri: Uri?, jpgUris: List<Uri>) {
+    fun addHistory(
+        title: String,
+        pageCount: Int,
+        format: String,
+        pdfUri: Uri?,
+        jpgUris: List<Uri>,
+        searchText: String = ""
+    ) {
         val rec = DocRecord(
             idCounter.incrementAndGet(),
             title,
@@ -196,7 +285,8 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
             pageCount,
             format,
             pdfUri?.toString(),
-            jpgUris.map { it.toString() }
+            jpgUris.map { it.toString() },
+            searchText
         )
         store.add(rec)
         docs = store.load()

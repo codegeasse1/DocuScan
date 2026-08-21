@@ -48,6 +48,7 @@ import com.docuscan.app.DocViewModel
 import com.docuscan.app.Tab
 import com.docuscan.app.data.DocRecord
 import com.docuscan.app.scan.BitmapUtil
+import com.docuscan.app.scan.PdfImport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -70,6 +71,22 @@ fun HomeScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
                 }
                 if (bmp != null) vm.addBitmap(bmp)
                 else snackbar.showSnackbar("Couldn't load that image")
+            }
+        }
+    }
+
+    val pdfLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val pages = withContext(Dispatchers.IO) { PdfImport.renderAll(context, uri) }
+                if (pages != null && pages.isNotEmpty()) {
+                    snackbar.showSnackbar("Imported ${pages.size} page${if (pages.size > 1) "s" else ""} from PDF")
+                    vm.addPdfPages(pages)
+                } else {
+                    snackbar.showSnackbar("Couldn't read that PDF")
+                }
             }
         }
     }
@@ -118,6 +135,19 @@ fun HomeScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
                 )
             }
         )
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            horizontalArrangement = Arrangement.Center
+        ) {
+            TextButton(onClick = { pdfLauncher.launch(arrayOf("application/pdf")) }) {
+                Icon(AppIcons.Gallery, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Import a PDF")
+            }
+        }
 
         Spacer(Modifier.height(24.dp))
 

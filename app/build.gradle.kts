@@ -87,5 +87,6 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
     implementation(libs.tesseract4android)
+    implementation(libs.androidx.documentfile)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
