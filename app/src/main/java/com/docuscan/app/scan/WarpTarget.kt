@@ -153,5 +153,5 @@ object WarpTarget {
         a1 * (b2 * 1 - 1 * c2) - a2 * (b1 * 1 - 1 * c1) + 1 * (b1 * c2 - b2 * c1)
 
     private fun distance(a: android.graphics.PointF, b: android.graphics.PointF): Double =
-        hypot(b.x - a.x, b.y - a.y)
+        hypot((b.x - a.x).toDouble(), (b.y - a.y).toDouble())
 }

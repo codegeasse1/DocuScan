@@ -690,5 +690,5 @@ object DocQuadPostprocessor {
             doubleArrayOf(p[0], p[1])
         }
 
-    private fun sigmoid(x: Double): Double = 1.0 / (1.0 + exp(-x))
+    private fun sigmoid(x: Float): Double = 1.0 / (1.0 + exp(-x.toDouble()))
 }

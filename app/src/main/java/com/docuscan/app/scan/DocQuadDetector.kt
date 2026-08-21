@@ -373,7 +373,7 @@ object EdgeSnapCornerRefiner {
             val q = Array(4) { i -> doubleArrayOf(quadTLTRBRBL[i][0] * scale, quadTLTRBRBL[i][1] * scale) }
 
             val diag = hypot(w.toDouble(), h.toDouble())
-            val searchRadius = diag * SEARCH_RADIUS_FRACTION coerceIn 4.0..48.0
+            val searchRadius = (diag * SEARCH_RADIUS_FRACTION).coerceIn(4.0, 48.0)
             val maxShift = diag * MAX_CORNER_SHIFT_FRACTION
 
             val lines = arrayOfNulls<DoubleArray>(4)
