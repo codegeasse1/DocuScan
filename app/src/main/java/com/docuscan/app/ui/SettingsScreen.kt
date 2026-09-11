@@ -92,6 +92,31 @@ fun SettingsScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
         }
 
         HorizontalDivider(Modifier.padding(vertical = 12.dp))
+        SectionTitle("Auto-enhance")
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Automatically brighten and level every page",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "Runs on-device with a fast levels stretch, so pages look cleaner as you edit and are enhanced when exported. No measurable impact on speed or battery.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+            Switch(
+                checked = s.autoEnhance,
+                onCheckedChange = { vm.updateSettings(s.copy(autoEnhance = it)) }
+            )
+        }
+
+        HorizontalDivider(Modifier.padding(vertical = 12.dp))
         SectionTitle("Export format")
         RadioRow(
             label = "PDF + JPG",
@@ -115,14 +140,14 @@ fun SettingsScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
         HorizontalDivider(Modifier.padding(vertical = 12.dp))
         SectionTitle("JPEG export")
         Text(
-            "Quality: ${s.jpegQuality}%",
+            "Quality: ${s.jpegQuality}% — 100% keeps maximum quality",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Slider(
             value = s.jpegQuality.toFloat(),
             onValueChange = { vm.updateSettings(s.copy(jpegQuality = it.toInt())) },
-            valueRange = 50f..100f
+            valueRange = 90f..100f
         )
         Row(Modifier.padding(bottom = 6.dp)) {
             FilterChip(

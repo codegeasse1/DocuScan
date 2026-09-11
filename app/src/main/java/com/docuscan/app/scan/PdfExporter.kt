@@ -12,19 +12,25 @@ object PdfExporter {
 
     /**
      * Renders every page onto its own PDF page. The page size follows [pageFormat]
-     * (FIT_TO_IMAGE matches the image's aspect ratio — no letterboxing; fixed formats
+     * (FIT_TO_IMAGE matches the image's aspect ratio - no letterboxing; fixed formats
      * scale the image to fit the chosen paper). The bitmap is downscaled to [quality]'s
      * target DPI and optionally converted to grayscale, mirroring makeacopy's presets.
+     *
+     * Pages are rendered lazily one at a time via [renderPage] (returning a fresh or
+     * source bitmap for index [pageCount]), so a multi-page export never has to hold
+     * every full-resolution page in memory at once.
      */
     fun createPdf(
-        pages: List<Bitmap>,
+        pageCount: Int,
+        renderPage: (Int) -> Bitmap,
         out: OutputStream,
         pageFormat: PageFormat = PageFormat.FIT_TO_IMAGE,
         quality: PdfQualityPreset = PdfQualityPreset.STANDARD
     ) {
         val doc = PdfDocument()
-        for (idx in pages.indices) {
-            var bmp = pages[idx]
+        for (idx in 0 until pageCount) {
+            val source = renderPage(idx)
+            var bmp = source
 
             // Scale to the target DPI (dominant file-size driver, like makeacopy's presets).
             if (pageFormat.isFixed) {
@@ -36,7 +42,9 @@ object PdfExporter {
             }
 
             if (quality.forceGrayscale) {
-                bmp = BitmapUtil.toGrayscale(bmp)
+                val gray = BitmapUtil.toGrayscale(bmp)
+                if (bmp !== source) bmp.recycle()
+                bmp = gray
             }
 
             val (pwRaw, phRaw) = pageFormat.pageSizePts(bmp.width, bmp.height)
@@ -54,6 +62,7 @@ object PdfExporter {
             page.canvas.drawBitmap(bmp, null, RectF(dx, dy, dx + dw, dy + dh), null)
 
             doc.finishPage(page)
+            if (bmp !== source) bmp.recycle()
         }
         doc.writeTo(out)
         doc.close()

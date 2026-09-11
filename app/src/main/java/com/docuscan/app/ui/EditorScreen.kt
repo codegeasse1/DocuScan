@@ -28,8 +28,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
@@ -65,6 +65,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.docuscan.app.DocViewModel
+import com.docuscan.app.scan.AutoEnhance
 import com.docuscan.app.scan.BitmapUtil
 import com.docuscan.app.scan.Exporter
 import com.docuscan.app.scan.FILTERS
@@ -96,7 +97,7 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
         if (uris.isNotEmpty()) {
             scope.launch {
                 val bitmaps = withContext(Dispatchers.IO) {
-                    uris.mapNotNull { BitmapUtil.loadFromUri(context, it, 2200) }
+                    uris.mapNotNull { BitmapUtil.loadFromUri(context, it, DocViewModel.MAX_IMPORT_DIM) }
                 }
                 if (bitmaps.isNotEmpty()) vm.addBitmaps(bitmaps)
                 else snackbar.showSnackbar("Couldn't load those images")
@@ -112,13 +113,16 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
     // Keyed on the source bitmap too, so rotating/cropping (which replace the bitmap)
     // refreshes the preview instead of leaving the previous pixels on screen.
     val srcBitmap = page.bitmap
-    var filtered by remember(srcBitmap, page.filterId, page.brightness, page.contrast) {
+    val autoEnhance = vm.settings.autoEnhance
+    var filtered by remember(srcBitmap, page.filterId, page.brightness, page.contrast, autoEnhance) {
         mutableStateOf<Bitmap?>(null)
     }
-    LaunchedEffect(srcBitmap, page.filterId, page.brightness, page.contrast) {
-        // Filters (esp. the OpenCV cleanup presets) run off the main thread so the UI stays smooth.
+    LaunchedEffect(srcBitmap, page.filterId, page.brightness, page.contrast, autoEnhance) {
+        // Filters (esp. the OpenCV cleanup presets) and the auto-enhancer run off the
+        // main thread so the UI stays smooth.
         filtered = withContext(Dispatchers.Default) {
-            applyFilter(srcBitmap, page.filterId, page.brightness, page.contrast)
+            val base = applyFilter(srcBitmap, page.filterId, page.brightness, page.contrast)
+            if (autoEnhance) AutoEnhance.apply(base) else base
         }
     }
 
@@ -373,11 +377,40 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
         ) {
             Text("Pages", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = { vm.movePage(vm.selectedPage, -1) }, enabled = vm.selectedPage > 0) {
-                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move left")
+            // Reorder the selected page within the document. These stay tappable even when
+            // there is nothing to move, so a tap always gives feedback instead of silently
+            // doing nothing.
+            IconButton(
+                onClick = {
+                    if (vm.selectedPage > 0) {
+                        vm.movePage(vm.selectedPage, -1)
+                    } else {
+                        scope.launch {
+                            snackbar.showSnackbar(
+                                if (vm.pages.size <= 1) "Add more pages to reorder them"
+                                else "This is already the first page"
+                            )
+                        }
+                    }
+                }
+            ) {
+                Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Move page left")
             }
-            IconButton(onClick = { vm.movePage(vm.selectedPage, 1) }, enabled = vm.selectedPage < vm.pages.size - 1) {
-                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move right")
+            IconButton(
+                onClick = {
+                    if (vm.selectedPage < vm.pages.size - 1) {
+                        vm.movePage(vm.selectedPage, 1)
+                    } else {
+                        scope.launch {
+                            snackbar.showSnackbar(
+                                if (vm.pages.size <= 1) "Add more pages to reorder them"
+                                else "This is already the last page"
+                            )
+                        }
+                    }
+                }
+            ) {
+                Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Move page right")
             }
             IconButton(onClick = { vm.removePage(vm.selectedPage) }, enabled = vm.pages.isNotEmpty()) {
                 Icon(Icons.Default.Delete, contentDescription = "Delete page", tint = MaterialTheme.colorScheme.error)
@@ -396,6 +429,7 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
                 Box(
                     Modifier
                         .size(72.dp)
+                        .animateItem()
                         .clip(RoundedCornerShape(10.dp))
                         .background(MaterialTheme.colorScheme.surface)
                         .border(
@@ -481,10 +515,10 @@ private fun JpgOptionsDialog(vm: DocViewModel, onExport: () -> Unit, onDismiss: 
                 Slider(
                     value = s.jpegQuality.toFloat(),
                     onValueChange = { vm.updateSettings(s.copy(jpegQuality = it.toInt())) },
-                    valueRange = 50f..100f
+                    valueRange = 90f..100f
                 )
                 Text(
-                    "${s.jpegQuality}%",
+                    "${s.jpegQuality}% — 100% keeps maximum quality",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

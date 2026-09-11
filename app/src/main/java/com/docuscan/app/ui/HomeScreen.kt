@@ -67,7 +67,7 @@ fun HomeScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
         if (uris.isNotEmpty()) {
             scope.launch {
                 val bitmaps = withContext(Dispatchers.IO) {
-                    uris.mapNotNull { BitmapUtil.loadFromUri(context, it, 2200) }
+                    uris.mapNotNull { BitmapUtil.loadFromUri(context, it, DocViewModel.MAX_IMPORT_DIM) }
                 }
                 if (bitmaps.isNotEmpty()) vm.addBitmaps(bitmaps)
                 else snackbar.showSnackbar("Couldn't load those images")

@@ -20,7 +20,7 @@ object PdfImport {
                 for (i in 0 until count) {
                     val page = renderer.openPage(i)
                     val maxPt = maxOf(page.width, page.height).toFloat()
-                    val scale = (2200f / maxPt).coerceIn(0.1f, 8f)
+                    val scale = (3000f / maxPt).coerceIn(0.1f, 8f)
                     val w = (page.width * scale).toInt().coerceAtLeast(1)
                     val h = (page.height * scale).toInt().coerceAtLeast(1)
                     val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)

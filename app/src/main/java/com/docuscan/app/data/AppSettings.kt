@@ -9,10 +9,11 @@ data class AppSettings(
     val inboxEnabled: Boolean = false,
     val inboxUri: String = "",
     val accessibilityEnabled: Boolean = false,
-    val jpegQuality: Int = 92,
+    val autoEnhance: Boolean = true,
+    val jpegQuality: Int = 100,
     val jpegColor: Boolean = true,
     val pageFormat: String = "FIT_TO_IMAGE",
-    val pdfQuality: String = "STANDARD"
+    val pdfQuality: String = "HIGH"
 ) {
     fun save(context: Context) {
         context.getSharedPreferences("docuscan", Context.MODE_PRIVATE).edit()
@@ -22,6 +23,7 @@ data class AppSettings(
             .putBoolean("inboxEnabled", inboxEnabled)
             .putString("inboxUri", inboxUri)
             .putBoolean("accessibilityEnabled", accessibilityEnabled)
+            .putBoolean("autoEnhance", autoEnhance)
             .putInt("jpegQuality", jpegQuality)
             .putBoolean("jpegColor", jpegColor)
             .putString("pageFormat", pageFormat)
@@ -39,10 +41,11 @@ data class AppSettings(
                 p.getBoolean("inboxEnabled", false),
                 p.getString("inboxUri", "") ?: "",
                 p.getBoolean("accessibilityEnabled", false),
-                p.getInt("jpegQuality", 92),
+                p.getBoolean("autoEnhance", true),
+                p.getInt("jpegQuality", 100),
                 p.getBoolean("jpegColor", true),
                 p.getString("pageFormat", "FIT_TO_IMAGE") ?: "FIT_TO_IMAGE",
-                p.getString("pdfQuality", "STANDARD") ?: "STANDARD"
+                p.getString("pdfQuality", "HIGH") ?: "HIGH"
             )
         }
     }

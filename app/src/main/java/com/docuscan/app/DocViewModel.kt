@@ -37,6 +37,16 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
     private val store = HistoryStore(context)
     private val idCounter = AtomicLong(System.currentTimeMillis())
 
+    companion object {
+        /**
+         * Longest edge kept for an imported page. High enough that a normal phone photo
+         * (up to ~12 MP) is stored at its original resolution, so nothing is lost by
+         * simply importing it; only absurdly large captures are trimmed, to stay safe
+         * on memory.
+         */
+        const val MAX_IMPORT_DIM = 4096
+    }
+
     var tab by mutableStateOf(Tab.Home)
         private set
     var screen by mutableStateOf<Screen>(Screen.Tabs)
@@ -80,7 +90,7 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
     fun addBitmaps(bitmaps: List<Bitmap>) {
         if (bitmaps.isEmpty()) return
         for (raw in bitmaps) {
-            var b = BitmapUtil.fitMax(raw, 2400)
+            var b = BitmapUtil.fitMax(raw, MAX_IMPORT_DIM)
             if (b !== raw) raw.recycle()
             // Images are never cropped automatically - the user crops manually in the
             // editor (or rotates), so nothing is lost on import.
@@ -94,7 +104,7 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
     fun addPdfPages(bitmaps: List<Bitmap>) {
         if (bitmaps.isEmpty()) return
         for (raw in bitmaps) {
-            var b = BitmapUtil.fitMax(raw, 2400)
+            var b = BitmapUtil.fitMax(raw, MAX_IMPORT_DIM)
             if (b !== raw) raw.recycle()
             pages.add(ScannedPage(idCounter.incrementAndGet(), b, settings.defaultFilter))
         }

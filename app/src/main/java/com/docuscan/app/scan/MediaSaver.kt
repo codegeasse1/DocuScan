@@ -12,7 +12,7 @@ import java.io.File
 
 object MediaSaver {
 
-    fun saveJpg(context: Context, bmp: Bitmap, name: String, quality: Int = 92): Uri? {
+    fun saveJpg(context: Context, bmp: Bitmap, name: String, quality: Int = 100): Uri? {
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, name)
