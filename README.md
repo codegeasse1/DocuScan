@@ -7,10 +7,11 @@ Built with **Kotlin + Jetpack Compose (Material 3) + CameraX**, modeled after th
 ## Features
 
 - 📷 **Camera capture** with in-app preview, flash & front/back flip (CameraX)
-- 🖼️ **Gallery import** (system photo picker — no storage permissions needed)
+- 🖼️ **Gallery import** (system photo picker — no storage permissions needed) with **multi-select** — pick as many images as the system allows (up to 100 at once) and they all become pages
 - 📄 **PDF import** — open an existing PDF and its pages become editable pages
-- 🧭 **Manual crop** — like MakeACopy: drag the four corners **or the edges** (parallel edge translation), with a **snap-to-right-angle** assist that locks near-vertical/horizontal edges to 90° and **aspect-ratio presets** (Auto, Original, A3/A4/A5, US Letter, Legal, custom) enforced at warp time; output is deskewed via perspective warp. The crop toolbar sits **at the bottom of the image** with **Rotate ⟲/⟳**, aspect chips and **Crop**/**Reset**/**Cancel** — exactly like MakeACopy's crop screen
-- 🔄 **Rotate** — rotate a page 90° at a time, either in the editor or while cropping
+- 🧭 **Manual crop** — like MakeACopy: drag the four corners **or the edges** (parallel edge translation), with a **snap-to-right-angle** assist that locks near-vertical/horizontal edges to 90°. **Auto** runs the OpenCV edge detector and places the box on the page; the other **aspect-ratio presets** (Original, A3/A4/A5, US Letter, Legal, custom) immediately **reshape the crop box** to that ratio (and it is also enforced at warp time), so tapping a size does something visible without hand-dragging. The crop controls sit **below the image** (glass panel) with **Rotate ⟲/⟳**, aspect chips and **Crop**/**Reset**/**Cancel** — nothing overlaps the document
+- 🔄 **Rotate** — rotate a page 90° at a time, either in the editor or while cropping; the editor preview updates instantly
+- 🧩 **Batch editing** — with several pages loaded, the editor's **"apply to all pages"** switch makes filter / brightness / contrast changes hit every page at once (or just the current one), and the gallery picker imports many images in one go
 - ✨ **MakeACopy document cleanup** — the same OpenCV presets: **Natural**, **Enhanced** and **Clean Text** (background flattening, CLAHE local contrast, clean-up), on top of the 19 classic filters
 - 🎨 **22 filters** — Original, Natural, Enhanced, Clean Text, Magic, B&W (real Otsu threshold binarization), Grayscale, Sepia, Polaroid, Vintage, Soft, Warm, Cool, Ocean, Rose, Blue, Invert, Vivid, Faded, Crisp, Sharpen, Night
 - 🔆 **Brightness & contrast** sliders
@@ -21,7 +22,7 @@ Built with **Kotlin + Jetpack Compose (Material 3) + CameraX**, modeled after th
 - 📤 **Share** with one tap (PDF or JPG)
 - 🗂️ **Document library** — browse, view, re-share or delete past scans, with **search over titles**
 - 📨 **Share-to-scan** — open an image from any app with "Send to DocuScan"
-- 🌙 **Modern Material 3 UI**, light/dark/system theme
+- 🌙 **Modern Material 3 UI** with translucent "glass" control panels (so the document is never covered), light/dark/system theme
 
 Everything is processed **on-device** — no network calls, no accounts, no uploads.
 
