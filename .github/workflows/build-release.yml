@@ -76,41 +76,26 @@ jobs:
 
       - name: Report build failure as issue
         if: failure()
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           {
-            echo "Run: ${{ github.run_number }} â commit ${{ github.sha }}"
+            echo "Run: ${{ github.run_number }} (commit \`${{ github.sha }}\`)"
             echo ""
             echo '```'
-            grep -E '^e: ' /tmp/gradle.log | tail -n 60
+            grep -E '^e: ' /tmp/gradle.log | tail -n 60 || true
             echo ""
-            grep -E 'error:|What went wrong:|FAILURE:|Caused by:' /tmp/gradle.log | tail -n 12
+            grep -E 'error:|What went wrong:|FAILURE:|Caused by:' /tmp/gradle.log | tail -n 12 || true
             echo '```'
           } > /tmp/issue.md
-          python3 - <<'EOF'
-          import json, os, urllib.request, urllib.error
-          body = open('/tmp/issue.md', encoding='utf-8', errors='replace').read()
-          data = json.dumps({
-              "title": "Build failure (run " + os.environ.get("GITHUB_RUN_NUMBER", "?") + ")",
-              "body": body
-          }).encode()
-          req = urllib.request.Request(
-              "https://api.github.com/repos/" + os.environ["GITHUB_REPOSITORY"] + "/issues",
-              data=data, method="POST",
-              headers={
-                  "Authorization": "Bearer " + os.environ["GH_TOKEN"],
-                  "Accept": "application/vnd.github+json",
-                  "User-Agent": "docuscan"
-              })
-          try:
-              resp = urllib.request.urlopen(req)
-              print("issue created:", resp.status)
-          except urllib.error.HTTPError as e:
-              print("issue post failed:", e.code, e.read().decode('utf-8', 'replace')[:500])
-          except Exception as e:
-              print("issue post error:", e)
-          EOF
+          EXISTING=$(gh api "repos/$GITHUB_REPOSITORY/issues?state=open&per_page=100" \
+            --jq '[.[] | select(.pull_request == null) | select(.title | startswith("Build failure")) | .number] | first // empty')
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body-file /tmp/issue.md
+          else
+            gh issue create --title "Build failure (run ${{ github.run_number }})" --body-file /tmp/issue.md
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -125,3 +110,15 @@ jobs:
           files: app/build/outputs/apk/release/app-release.apk
           fail_on_unmatched_files: true
           make_latest: true
+
+      - name: Close build-failure issues when green
+        if: success()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NUMS=$(gh api "repos/$GITHUB_REPOSITORY/issues?state=open&per_page=100" \
+            --jq '.[] | select(.pull_request == null) | select(.title | startswith("Build failure")) | .number')
+          for n in $NUMS; do
+            gh issue close "$n" --comment "Resolved: build run ${{ github.run_number }} (commit ${{ github.sha }}) succeeded, so this failure is no longer current."
+          done
