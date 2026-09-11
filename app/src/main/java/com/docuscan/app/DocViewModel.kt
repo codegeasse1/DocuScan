@@ -74,12 +74,18 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
         screen = if (returnToEditor) Screen.Editor else Screen.Tabs
     }
 
-    fun addBitmap(raw: Bitmap) {
-        var b = BitmapUtil.fitMax(raw, 2400)
-        if (b !== raw) raw.recycle()
-        // Images are never cropped automatically - the user crops manually in the
-        // editor (or rotates), so nothing is lost on import.
-        pages.add(ScannedPage(idCounter.incrementAndGet(), b, settings.defaultFilter))
+    fun addBitmap(raw: Bitmap) = addBitmaps(listOf(raw))
+
+    /** Adds several images at once (multi-select from the gallery). */
+    fun addBitmaps(bitmaps: List<Bitmap>) {
+        if (bitmaps.isEmpty()) return
+        for (raw in bitmaps) {
+            var b = BitmapUtil.fitMax(raw, 2400)
+            if (b !== raw) raw.recycle()
+            // Images are never cropped automatically - the user crops manually in the
+            // editor (or rotates), so nothing is lost on import.
+            pages.add(ScannedPage(idCounter.incrementAndGet(), b, settings.defaultFilter))
+        }
         selectedPage = pages.size - 1
         screen = Screen.Editor
     }
@@ -108,8 +114,9 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
         if (i in pages.indices) selectedPage = i
     }
 
+    /** Removes a page; removing the last page clears the document (the editor then returns home). */
     fun removePage(i: Int) {
-        if (pages.size <= 1) return
+        if (i !in pages.indices) return
         pages.removeAt(i)
         selectedPage = selectedPage.coerceAtMost(pages.size - 1).coerceAtLeast(0)
     }
@@ -132,24 +139,41 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setFilter(f: String) {
-        val i = selectedPage
-        if (i in pages.indices) pages[i] = pages[i].copy(filterId = f)
+    /** [all] = true applies the change to every page (batch mode), else just the selected page. */
+    fun setFilter(f: String, all: Boolean = false) {
+        if (all) {
+            for (i in pages.indices) pages[i] = pages[i].copy(filterId = f)
+        } else {
+            val i = selectedPage
+            if (i in pages.indices) pages[i] = pages[i].copy(filterId = f)
+        }
     }
 
-    fun setBrightness(v: Float) {
-        val i = selectedPage
-        if (i in pages.indices) pages[i] = pages[i].copy(brightness = v)
+    fun setBrightness(v: Float, all: Boolean = false) {
+        if (all) {
+            for (i in pages.indices) pages[i] = pages[i].copy(brightness = v)
+        } else {
+            val i = selectedPage
+            if (i in pages.indices) pages[i] = pages[i].copy(brightness = v)
+        }
     }
 
-    fun setContrast(v: Float) {
-        val i = selectedPage
-        if (i in pages.indices) pages[i] = pages[i].copy(contrast = v)
+    fun setContrast(v: Float, all: Boolean = false) {
+        if (all) {
+            for (i in pages.indices) pages[i] = pages[i].copy(contrast = v)
+        } else {
+            val i = selectedPage
+            if (i in pages.indices) pages[i] = pages[i].copy(contrast = v)
+        }
     }
 
-    fun resetAdjustments() {
-        val i = selectedPage
-        if (i in pages.indices) pages[i] = pages[i].copy(brightness = 0f, contrast = 1f)
+    fun resetAdjustments(all: Boolean = false) {
+        if (all) {
+            for (i in pages.indices) pages[i] = pages[i].copy(brightness = 0f, contrast = 1f)
+        } else {
+            val i = selectedPage
+            if (i in pages.indices) pages[i] = pages[i].copy(brightness = 0f, contrast = 1f)
+        }
     }
 
     fun updateSettings(s: AppSettings) {

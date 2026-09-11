@@ -33,16 +33,18 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -85,15 +87,19 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
     var jpgOptions by remember { mutableStateOf(false) }
     var addDialog by remember { mutableStateOf(false) }
     var discardDialog by remember { mutableStateOf(false) }
+    // When on, filter / brightness / contrast changes are applied to every page (batch mode).
+    var applyToAll by remember { mutableStateOf(false) }
 
     val galleryLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
-        if (uri != null) {
+        ActivityResultContracts.PickMultipleVisualMedia()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
             scope.launch {
-                val bmp = withContext(Dispatchers.IO) { BitmapUtil.loadFromUri(context, uri, 2200) }
-                if (bmp != null) vm.addBitmap(bmp)
-                else snackbar.showSnackbar("Couldn't load that image")
+                val bitmaps = withContext(Dispatchers.IO) {
+                    uris.mapNotNull { BitmapUtil.loadFromUri(context, it, 2200) }
+                }
+                if (bitmaps.isNotEmpty()) vm.addBitmaps(bitmaps)
+                else snackbar.showSnackbar("Couldn't load those images")
             }
         }
     }
@@ -103,14 +109,16 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
         return
     }
 
-    var filtered by remember(page.id, page.filterId, page.brightness, page.contrast) {
+    // Keyed on the source bitmap too, so rotating/cropping (which replace the bitmap)
+    // refreshes the preview instead of leaving the previous pixels on screen.
+    val srcBitmap = page.bitmap
+    var filtered by remember(srcBitmap, page.filterId, page.brightness, page.contrast) {
         mutableStateOf<Bitmap?>(null)
     }
-    LaunchedEffect(page.id, page.filterId, page.brightness, page.contrast) {
+    LaunchedEffect(srcBitmap, page.filterId, page.brightness, page.contrast) {
         // Filters (esp. the OpenCV cleanup presets) run off the main thread so the UI stays smooth.
-        filtered = null
         filtered = withContext(Dispatchers.Default) {
-            applyFilter(page.bitmap, page.filterId, page.brightness, page.contrast)
+            applyFilter(srcBitmap, page.filterId, page.brightness, page.contrast)
         }
     }
 
@@ -252,71 +260,79 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
                         text = { Text("Save JPG (options…)") },
                         onClick = { saveMenu = false; jpgOptions = true }
                     )
-                    DropdownMenuItem(text = { Text("Save JPG (options…)") }, onClick = { saveMenu = false; jpgOptions = true })
                 }
             }
         }
 
-        // ===== Image area =====
+        // ===== Image area (no controls overlap the document) =====
         Box(
             Modifier
                 .fillMaxWidth()
                 .weight(1f)
                 .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
+            // Show the previous/raw bitmap while a filter recomputes so the preview never
+            // flashes empty - rotation and cropping appear instantly.
             val f = filtered
-            if (f != null) {
-                Image(
-                    bitmap = f.asImageBitmap(),
-                    contentDescription = "Scanned page",
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(8.dp),
-                    contentScale = ContentScale.Fit
-                )
-            } else {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            }
-            // Action pill overlay
-            Surface(
+            Image(
+                bitmap = (f ?: srcBitmap).asImageBitmap(),
+                contentDescription = "Scanned page",
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 12.dp),
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.9f),
-                contentColor = MaterialTheme.colorScheme.inverseOnSurface
-            ) {
-                Row(Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
-                    ActionButton("Crop", AppIcons.Crop) { cropMode = true }
-                    ActionButton("Rotate", Icons.Default.Refresh) { vm.rotateSelected() }
-                    ActionButton("Delete", Icons.Default.Delete) { vm.removePage(vm.selectedPage) }
-                }
+                    .fillMaxSize()
+                    .padding(8.dp),
+                contentScale = ContentScale.Fit
+            )
+            if (f == null) {
+                LinearProgressIndicator(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                )
             }
         }
 
-        // ===== Adjust panel =====
-        if (showAdjust) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        // ===== Bottom control deck (transparent glass) =====
+        GlassPanel(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ActionButton("Crop", AppIcons.Crop) { cropMode = true }
+                ActionButton("Rotate", Icons.Default.Refresh) { vm.rotateSelected() }
+                ActionButton("Delete", Icons.Default.Delete) { vm.removePage(vm.selectedPage) }
+            }
+
+            if (showAdjust) {
+                Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Brightness", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
-                    TextButton(onClick = { vm.resetAdjustments() }) { Text("Reset") }
+                    TextButton(onClick = { vm.resetAdjustments(applyToAll) }) { Text("Reset") }
                 }
                 Slider(
                     value = page.brightness,
-                    onValueChange = { vm.setBrightness(it) },
+                    onValueChange = { vm.setBrightness(it, applyToAll) },
                     valueRange = -1f..1f
                 )
-                Row {
-                    Text("Contrast", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
-                    Spacer(Modifier.width(8.dp))
-                }
+                Text("Contrast", style = MaterialTheme.typography.labelMedium)
                 Slider(
                     value = page.contrast,
-                    onValueChange = { vm.setContrast(it) },
+                    onValueChange = { vm.setContrast(it, applyToAll) },
                     valueRange = 0.5f..1.6f
                 )
+            }
+
+            if (vm.pages.size > 1) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Apply filters & adjustments to all ${vm.pages.size} pages",
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    Switch(checked = applyToAll, onCheckedChange = { applyToAll = it })
+                }
             }
         }
 
@@ -328,7 +344,7 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
             itemsIndexed(FILTERS) { _, f ->
                 FilterChip(
                     selected = page.filterId == f.id,
-                    onClick = { vm.setFilter(f.id) },
+                    onClick = { vm.setFilter(f.id, applyToAll) },
                     label = { Text(f.label) }
                 )
             }
@@ -363,7 +379,7 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
             IconButton(onClick = { vm.movePage(vm.selectedPage, 1) }, enabled = vm.selectedPage < vm.pages.size - 1) {
                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move right")
             }
-            IconButton(onClick = { vm.removePage(vm.selectedPage) }, enabled = vm.pages.size > 1) {
+            IconButton(onClick = { vm.removePage(vm.selectedPage) }, enabled = vm.pages.isNotEmpty()) {
                 Icon(Icons.Default.Delete, contentDescription = "Delete page", tint = MaterialTheme.colorScheme.error)
             }
         }
@@ -413,11 +429,11 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
 
 @Composable
 private fun ActionButton(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
-    androidx.compose.material3.Surface(
+    Surface(
         onClick = onClick,
         shape = RoundedCornerShape(18.dp),
         color = Color.Transparent,
-        contentColor = androidx.compose.material3.LocalContentColor.current
+        contentColor = LocalContentColor.current
     ) {
         Row(
             Modifier.padding(horizontal = 10.dp, vertical = 6.dp),

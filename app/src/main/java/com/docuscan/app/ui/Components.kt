@@ -1,10 +1,13 @@
 package com.docuscan.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -64,6 +67,33 @@ fun RemoteBitmap(uriString: String?, modifier: Modifier = Modifier, maxDim: Int 
             )
         }
     }
+}
+
+/**
+ * A translucent "glass" card used for the editor's bottom controls so they read as a
+ * floating, frosted panel instead of an opaque block sitting over the document.
+ */
+@Composable
+fun GlassPanel(
+    modifier: Modifier = Modifier,
+    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(22.dp),
+    alpha: Float = 0.62f,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val base = MaterialTheme.colorScheme.surface
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(base.copy(alpha = alpha))
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f),
+                shape
+            )
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        content = content
+    )
 }
 
 @Composable

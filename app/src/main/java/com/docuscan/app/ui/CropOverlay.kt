@@ -12,13 +12,19 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -26,11 +32,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,9 +53,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.docuscan.app.scan.BitmapUtil
+import com.docuscan.app.scan.Cleanup
 import com.docuscan.app.scan.CropAspectRatio
 import com.docuscan.app.scan.CropGeometry
 import com.docuscan.app.scan.WarpTarget
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 /** Frozen state captured at edge-drag touch-down (parallel translation). */
@@ -90,8 +102,11 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
     var aspectRatio by remember { mutableStateOf(CropAspectRatio.AUTO) }
     var customRatioText by remember { mutableStateOf("1.4142") }
     var customDialog by remember { mutableStateOf(false) }
+    var detecting by remember { mutableStateOf(false) }
+    var hint by remember { mutableStateOf<String?>(null) }
     val snapActive = remember { mutableStateListOf(false, false, false, false) }
     var snapHighlight by remember { mutableIntStateOf(-1) }
+    val scope = rememberCoroutineScope()
 
     fun corner(i: Int): Offset {
         val f = fit
@@ -102,6 +117,89 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
         val f = fit
         norm[i * 2] = ((x - f.left) / f.width).coerceIn(-0.05f, 1.05f)
         norm[i * 2 + 1] = ((y - f.top) / f.height).coerceIn(-0.05f, 1.05f)
+    }
+
+    fun reset() {
+        norm[0] = 0.02f; norm[1] = 0.02f
+        norm[2] = 0.98f; norm[3] = 0.02f
+        norm[4] = 0.98f; norm[5] = 0.98f
+        norm[6] = 0.02f; norm[7] = 0.98f
+    }
+
+    /** Places an axis-aligned rect of the given view-space size, centered on (cx, cy), inside the image. */
+    fun setRectAround(cx: Float, cy: Float, w: Float, h: Float) {
+        val f = fit
+        var left = cx - w / 2f
+        var top = cy - h / 2f
+        var right = left + w
+        var bottom = top + h
+        if (left < f.left) { right += f.left - left; left = f.left }
+        if (right > f.right) { left -= right - f.right; right = f.right }
+        if (top < f.top) { bottom += f.top - top; top = f.top }
+        if (bottom > f.bottom) { top -= bottom - f.bottom; bottom = f.bottom }
+        setViewCorner(0, left, top)
+        setViewCorner(1, right, top)
+        setViewCorner(2, right, bottom)
+        setViewCorner(3, left, bottom)
+    }
+
+    /** Reshapes the crop box to the given short/long ratio, keeping it centered on the current box. */
+    fun reshapeToRatio(shortOverLong: Double) {
+        if (!(shortOverLong > 0.0) || shortOverLong > 1.0 || !shortOverLong.isFinite()) return
+        val f = fit
+        val xs = (0..3).map { corner(it).x }
+        val ys = (0..3).map { corner(it).y }
+        val cx = (xs.min() + xs.max()) / 2f
+        val cy = (ys.min() + ys.max()) / 2f
+        val bboxW = (xs.max() - xs.min()).coerceAtLeast(1f)
+        val bboxH = (ys.max() - ys.min()).coerceAtLeast(1f)
+        val landscape = bboxW >= bboxH
+        val ratioWh = if (landscape) (1.0 / shortOverLong).toFloat() else shortOverLong.toFloat()
+        var w = bboxW
+        var h = w / ratioWh
+        if (h > bboxH) { h = bboxH; w = h * ratioWh }
+        if (w > f.width) { w = f.width; h = w / ratioWh }
+        if (h > f.height) { h = f.height; w = h * ratioWh }
+        if (w < 24f || h < 24f) return
+        setRectAround(cx, cy, w, h)
+    }
+
+    suspend fun detectEdges(): Boolean {
+        detecting = true
+        val pts = withContext(Dispatchers.Default) {
+            runCatching { Cleanup.detectCorners(rotBitmap) }.getOrNull()
+        }
+        detecting = false
+        if (pts == null || pts.size != 4) {
+            hint = "Couldn't detect page edges — drag the corners or pick a size."
+            return false
+        }
+        for (i in 0..3) {
+            norm[i * 2] = (pts[i].x / rotBitmap.width).coerceIn(0f, 1f)
+            norm[i * 2 + 1] = (pts[i].y / rotBitmap.height).coerceIn(0f, 1f)
+        }
+        hint = "Auto-detected the page edges — fine-tune if needed."
+        return true
+    }
+
+    fun selectPreset(r: CropAspectRatio) {
+        when (r) {
+            CropAspectRatio.CUSTOM -> { customDialog = true; return }
+            CropAspectRatio.AUTO -> {
+                aspectRatio = CropAspectRatio.AUTO
+                scope.launch { detectEdges() }
+            }
+            CropAspectRatio.ORIGINAL -> {
+                aspectRatio = CropAspectRatio.ORIGINAL
+                reset()
+                hint = null
+            }
+            else -> {
+                aspectRatio = r
+                r.shortOverLong()?.let { reshapeToRatio(it) }
+                hint = null
+            }
+        }
     }
 
     fun applyCrop() {
@@ -145,13 +243,6 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
         onApply(BitmapUtil.perspectiveWarp(rotBitmap, q, outW, outH))
     }
 
-    fun reset() {
-        norm[0] = 0.02f; norm[1] = 0.02f
-        norm[2] = 0.98f; norm[3] = 0.02f
-        norm[4] = 0.98f; norm[5] = 0.98f
-        norm[6] = 0.02f; norm[7] = 0.98f
-    }
-
     fun rotateLeft() {
         rotBitmap = BitmapUtil.rotate90(rotBitmap)
         reset()
@@ -162,259 +253,285 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
         reset()
     }
 
+    // When the crop screen opens (and after each rotate) try to place the box on the page edges.
+    LaunchedEffect(rotBitmap) {
+        detectEdges()
+    }
+
     val accent = MaterialTheme.colorScheme.primary
     val accentInt = accent.toArgbCompat()
 
-    Box(
+    Column(
         Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .onSizeChanged { boxSize = it }
     ) {
-        Canvas(
+        // ===== Image area: the crop canvas only - no controls overlap it =====
+        Box(
             Modifier
-                .fillMaxSize()
-                .pointerInput(boxSize, rotBitmap) {
-                    detectDragGestures(
-                        onDragStart = { pos ->
-                            // Corner hit first (larger radius), then edge hit.
-                            var best = -1
-                            var bestD = 70f
-                            for (i in 0..3) {
-                                val d = (corner(i) - pos).getDistance()
-                                if (d < bestD) {
-                                    bestD = d
-                                    best = i
-                                }
-                            }
-                            if (best >= 0) {
-                                dragCorner = best
-                                edgeDrag = null
-                                return@detectDragGestures
-                            }
-                            val xs = FloatArray(4) { corner(it).x }
-                            val ys = FloatArray(4) { corner(it).y }
-                            val e = CropGeometry.findEdgeHit(xs, ys, pos.x, pos.y)
-                            if (e >= 0) {
-                                val a = e
-                                val b = (e + 1) % 4
-                                val m0x = (xs[a] + xs[b]) / 2f
-                                val m0y = (ys[a] + ys[b]) / 2f
-                                val n = CropGeometry.outwardUnitNormal(xs, ys, e)
-                                edgeDrag = EdgeDrag(e, xs, ys, m0x, m0y, n[0], n[1])
-                                dragCorner = -1
-                            }
-                        },
-                        onDrag = { change, _ ->
-                            val ed = edgeDrag
-                            if (ed != null) {
-                                val res = CropGeometry.applyEdgeTranslation(
-                                    ed.xs0, ed.ys0, ed.edgeIndex,
-                                    ed.m0x, ed.m0y, ed.nx, ed.ny,
-                                    change.position.x, change.position.y
-                                )
-                                if (res.applied) {
-                                    for (i in 0..3) setViewCorner(i, res.xs[i], res.ys[i])
-                                }
-                            } else if (dragCorner >= 0) {
-                                val i = dragCorner
-                                val newX = change.position.x.coerceIn(fit.left, fit.right)
-                                val newY = change.position.y.coerceIn(fit.top, fit.bottom)
-                                val corners = (0..3).map { corner(it).x.toDouble() to corner(it).y.toDouble() }
-                                val res = CropGeometry.snapEvaluate(
-                                    corners, i,
-                                    newX.toDouble(), newY.toDouble(),
-                                    snapActive[(i + 3) % 4], snapActive[i]
-                                )
-                                setViewCorner(i, res.x.toFloat(), res.y.toFloat())
-                                snapActive[(i + 3) % 4] = res.prevEdgeSnapped
-                                snapActive[i] = res.nextEdgeSnapped
-                                snapHighlight = when {
-                                    res.prevEdgeSnapped -> (i + 3) % 4
-                                    res.nextEdgeSnapped -> i
-                                    else -> -1
-                                }
-                            }
-                            change.consume()
-                        },
-                        onDragEnd = {
-                            dragCorner = -1
-                            edgeDrag = null
-                            for (i in 0..3) snapActive[i] = false
-                            snapHighlight = -1
-                        },
-                        onDragCancel = {
-                            dragCorner = -1
-                            edgeDrag = null
-                            for (i in 0..3) snapActive[i] = false
-                            snapHighlight = -1
-                        }
-                    )
-                }
+                .fillMaxWidth()
+                .weight(1f)
+                .onSizeChanged { boxSize = it }
         ) {
-            val f = fit
-            val rect = RectF(f.left, f.top, f.right, f.bottom)
-            val canvas = drawContext.canvas.nativeCanvas
+            Canvas(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(boxSize, rotBitmap) {
+                        detectDragGestures(
+                            onDragStart = { pos ->
+                                // Corner hit first (larger radius), then edge hit.
+                                var best = -1
+                                var bestD = 70f
+                                for (i in 0..3) {
+                                    val d = (corner(i) - pos).getDistance()
+                                    if (d < bestD) {
+                                        bestD = d
+                                        best = i
+                                    }
+                                }
+                                if (best >= 0) {
+                                    dragCorner = best
+                                    edgeDrag = null
+                                    return@detectDragGestures
+                                }
+                                val xs = FloatArray(4) { corner(it).x }
+                                val ys = FloatArray(4) { corner(it).y }
+                                val e = CropGeometry.findEdgeHit(xs, ys, pos.x, pos.y)
+                                if (e >= 0) {
+                                    val a = e
+                                    val b = (e + 1) % 4
+                                    val m0x = (xs[a] + xs[b]) / 2f
+                                    val m0y = (ys[a] + ys[b]) / 2f
+                                    val n = CropGeometry.outwardUnitNormal(xs, ys, e)
+                                    edgeDrag = EdgeDrag(e, xs, ys, m0x, m0y, n[0], n[1])
+                                    dragCorner = -1
+                                }
+                            },
+                            onDrag = { change, _ ->
+                                val ed = edgeDrag
+                                if (ed != null) {
+                                    val res = CropGeometry.applyEdgeTranslation(
+                                        ed.xs0, ed.ys0, ed.edgeIndex,
+                                        ed.m0x, ed.m0y, ed.nx, ed.ny,
+                                        change.position.x, change.position.y
+                                    )
+                                    if (res.applied) {
+                                        for (i in 0..3) setViewCorner(i, res.xs[i], res.ys[i])
+                                    }
+                                } else if (dragCorner >= 0) {
+                                    val i = dragCorner
+                                    val newX = change.position.x.coerceIn(fit.left, fit.right)
+                                    val newY = change.position.y.coerceIn(fit.top, fit.bottom)
+                                    val corners = (0..3).map { corner(it).x.toDouble() to corner(it).y.toDouble() }
+                                    val res = CropGeometry.snapEvaluate(
+                                        corners, i,
+                                        newX.toDouble(), newY.toDouble(),
+                                        snapActive[(i + 3) % 4], snapActive[i]
+                                    )
+                                    setViewCorner(i, res.x.toFloat(), res.y.toFloat())
+                                    snapActive[(i + 3) % 4] = res.prevEdgeSnapped
+                                    snapActive[i] = res.nextEdgeSnapped
+                                    snapHighlight = when {
+                                        res.prevEdgeSnapped -> (i + 3) % 4
+                                        res.nextEdgeSnapped -> i
+                                        else -> -1
+                                    }
+                                }
+                                change.consume()
+                            },
+                            onDragEnd = {
+                                dragCorner = -1
+                                edgeDrag = null
+                                for (i in 0..3) snapActive[i] = false
+                                snapHighlight = -1
+                            },
+                            onDragCancel = {
+                                dragCorner = -1
+                                edgeDrag = null
+                                for (i in 0..3) snapActive[i] = false
+                                snapHighlight = -1
+                            }
+                        )
+                    }
+            ) {
+                val f = fit
+                val rect = RectF(f.left, f.top, f.right, f.bottom)
+                val canvas = drawContext.canvas.nativeCanvas
 
-            canvas.drawBitmap(rotBitmap, null, rect, Paint(Paint.FILTER_BITMAP_FLAG))
+                canvas.drawBitmap(rotBitmap, null, rect, Paint(Paint.FILTER_BITMAP_FLAG))
 
-            val c0 = corner(0)
-            val c1 = corner(1)
-            val c2 = corner(2)
-            val c3 = corner(3)
+                val c0 = corner(0)
+                val c1 = corner(1)
+                val c2 = corner(2)
+                val c3 = corner(3)
 
-            val quad = Path().apply {
-                moveTo(c0.x, c0.y)
-                lineTo(c1.x, c1.y)
-                lineTo(c2.x, c2.y)
-                lineTo(c3.x, c3.y)
-                close()
-            }
+                val quad = Path().apply {
+                    moveTo(c0.x, c0.y)
+                    lineTo(c1.x, c1.y)
+                    lineTo(c2.x, c2.y)
+                    lineTo(c3.x, c3.y)
+                    close()
+                }
 
-            val mask = Path().apply {
-                addRect(RectF(0f, 0f, size.width, size.height), Path.Direction.CW)
-                addPath(quad, 0f, 0f)
-                setFillType(Path.FillType.EVEN_ODD)
-            }
-            canvas.drawPath(mask, Paint().apply { color = android.graphics.Color.argb(150, 0, 0, 0) })
+                val mask = Path().apply {
+                    addRect(RectF(0f, 0f, size.width, size.height), Path.Direction.CW)
+                    addPath(quad, 0f, 0f)
+                    setFillType(Path.FillType.EVEN_ODD)
+                }
+                canvas.drawPath(mask, Paint().apply { color = android.graphics.Color.argb(150, 0, 0, 0) })
 
-            // Rule-of-thirds grid
-            val gridPaint = Paint().apply {
-                color = android.graphics.Color.argb(90, 255, 255, 255)
-                strokeWidth = 1.dp.toPx()
-            }
-            for (i in 1..2) {
-                val x = f.left + f.width * i / 3f
-                canvas.drawLine(x, f.top, x, f.bottom, gridPaint)
-                val y = f.top + f.height * i / 3f
-                canvas.drawLine(f.left, y, f.right, y, gridPaint)
-            }
+                // Rule-of-thirds grid
+                val gridPaint = Paint().apply {
+                    color = android.graphics.Color.argb(90, 255, 255, 255)
+                    strokeWidth = 1.dp.toPx()
+                }
+                for (i in 1..2) {
+                    val x = f.left + f.width * i / 3f
+                    canvas.drawLine(x, f.top, x, f.bottom, gridPaint)
+                    val y = f.top + f.height * i / 3f
+                    canvas.drawLine(f.left, y, f.right, y, gridPaint)
+                }
 
-            canvas.drawPath(quad, Paint().apply {
-                style = Paint.Style.STROKE
-                strokeWidth = 2.dp.toPx()
-                color = accentInt
-            })
-
-            val corners = arrayOf(c0, c1, c2, c3)
-
-            // Edge midpoint handles (parallel edge dragging)
-            val midPaint = Paint().apply {
-                color = android.graphics.Color.WHITE
-                style = Paint.Style.STROKE
-                strokeWidth = 3.dp.toPx()
-            }
-            for (i in 0..3) {
-                val a = corners[i]
-                val b = corners[(i + 1) % 4]
-                val mx = (a.x + b.x) / 2f
-                val my = (a.y + b.y) / 2f
-                canvas.drawLine(mx - 6.dp.toPx(), my, mx + 6.dp.toPx(), my, midPaint)
-                canvas.drawLine(mx, my - 6.dp.toPx(), mx, my + 6.dp.toPx(), midPaint)
-            }
-
-            // Snap-to-right-angle highlight: brighter, thicker edge
-            if (snapHighlight in 0..3) {
-                val a = corners[snapHighlight]
-                val b = corners[(snapHighlight + 1) % 4]
-                canvas.drawLine(a.x, a.y, b.x, b.y, Paint().apply {
-                    color = Color.White.toArgbCompat()
+                canvas.drawPath(quad, Paint().apply {
                     style = Paint.Style.STROKE
-                    strokeWidth = 5.dp.toPx()
+                    strokeWidth = 2.dp.toPx()
+                    color = accentInt
                 })
+
+                val corners = arrayOf(c0, c1, c2, c3)
+
+                // Edge midpoint handles (parallel edge dragging)
+                val midPaint = Paint().apply {
+                    color = android.graphics.Color.WHITE
+                    style = Paint.Style.STROKE
+                    strokeWidth = 3.dp.toPx()
+                }
+                for (i in 0..3) {
+                    val a = corners[i]
+                    val b = corners[(i + 1) % 4]
+                    val mx = (a.x + b.x) / 2f
+                    val my = (a.y + b.y) / 2f
+                    canvas.drawLine(mx - 6.dp.toPx(), my, mx + 6.dp.toPx(), my, midPaint)
+                    canvas.drawLine(mx, my - 6.dp.toPx(), mx, my + 6.dp.toPx(), midPaint)
+                }
+
+                // Snap-to-right-angle highlight: brighter, thicker edge
+                if (snapHighlight in 0..3) {
+                    val a = corners[snapHighlight]
+                    val b = corners[(snapHighlight + 1) % 4]
+                    canvas.drawLine(a.x, a.y, b.x, b.y, Paint().apply {
+                        color = Color.White.toArgbCompat()
+                        style = Paint.Style.STROKE
+                        strokeWidth = 5.dp.toPx()
+                    })
+                }
+
+                for (i in 0..3) {
+                    val c = corner(i)
+                    canvas.drawCircle(c.x, c.y, 14.dp.toPx(), Paint().apply { color = android.graphics.Color.WHITE })
+                    canvas.drawCircle(c.x, c.y, 9.dp.toPx(), Paint().apply { color = accentInt })
+                }
             }
 
-            for (i in 0..3) {
-                val c = corner(i)
-                canvas.drawCircle(c.x, c.y, 14.dp.toPx(), Paint().apply { color = android.graphics.Color.WHITE })
-                canvas.drawCircle(c.x, c.y, 9.dp.toPx(), Paint().apply { color = accentInt })
+            if (detecting) {
+                Surface(
+                    modifier = Modifier.align(Alignment.Center),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.Black.copy(alpha = 0.6f),
+                    contentColor = Color.White
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Detecting edges…", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
             }
         }
 
-        // Top hint (over the image)
-        Text(
-            "Drag corners or edges · edges snap to 90°",
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 12.dp, start = 16.dp, end = 16.dp),
-            color = Color.White.copy(alpha = 0.75f),
-            style = MaterialTheme.typography.labelMedium,
-            textAlign = TextAlign.Center
-        )
-
-        // Bottom toolbar (over the image, like makeacopy's crop screen)
-        Column(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(bottom = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+        // ===== Control panel (below the image, transparent glass) =====
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = Color.White.copy(alpha = 0.07f),
+            contentColor = Color.White,
+            shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Surface(
-                    onClick = { rotateLeft() },
-                    shape = androidx.compose.foundation.shape.CircleShape,
-                    color = Color.Black.copy(alpha = 0.45f),
-                    contentColor = Color.White
-                ) {
-                    Text(
-                        "⟲",
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Surface(
-                    onClick = { rotateRight() },
-                    shape = androidx.compose.foundation.shape.CircleShape,
-                    color = Color.Black.copy(alpha = 0.45f),
-                    contentColor = Color.White
-                ) {
-                    Text(
-                        "⟳",
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            LazyRow(
+            Column(
                 Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp, bottom = 6.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
+                    .navigationBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                items(CropAspectRatio.entries) { r ->
-                    FilterChip(
-                        selected = aspectRatio == r,
-                        onClick = {
-                            if (r == CropAspectRatio.CUSTOM) customDialog = true else aspectRatio = r
-                        },
-                        label = { Text(r.label, color = Color.White) }
-                    )
-                }
-            }
+                Text(
+                    hint ?: "Drag corners or edges · edges snap to 90°",
+                    color = Color.White.copy(alpha = 0.78f),
+                    style = MaterialTheme.typography.labelMedium,
+                    textAlign = TextAlign.Center
+                )
 
-            Surface(
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
-                color = Color.Black.copy(alpha = 0.55f),
-                contentColor = Color.White
-            ) {
+                Spacer(Modifier.height(8.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Surface(
+                        onClick = { rotateLeft() },
+                        shape = androidx.compose.foundation.shape.CircleShape,
+                        color = Color.White.copy(alpha = 0.12f),
+                        contentColor = Color.White
+                    ) {
+                        Text(
+                            "⟲",
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Text("Rotate", style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.78f))
+                    Surface(
+                        onClick = { rotateRight() },
+                        shape = androidx.compose.foundation.shape.CircleShape,
+                        color = Color.White.copy(alpha = 0.12f),
+                        contentColor = Color.White
+                    ) {
+                        Text(
+                            "⟳",
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                LazyRow(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp, bottom = 6.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    items(CropAspectRatio.entries) { r ->
+                        FilterChip(
+                            selected = aspectRatio == r,
+                            onClick = { selectPreset(r) },
+                            label = { Text(r.label, color = Color.White) }
+                        )
+                    }
+                }
+
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                        .padding(horizontal = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     TextButton(onClick = onCancel) { Text("Cancel", color = Color.White) }
-                    TextButton(onClick = { reset() }) { Text("Reset", color = Color.White) }
+                    TextButton(onClick = { reset(); hint = null }) { Text("Reset", color = Color.White) }
                     TextButton(onClick = { applyCrop() }) {
                         Text("Crop", color = Color.White, fontWeight = FontWeight.Bold)
                     }
@@ -440,9 +557,11 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
             },
             confirmButton = {
                 TextButton(onClick = {
-                    if (customRatioText.toFloatOrNull() != null) {
+                    val ratio = customRatioText.replace(',', '.').toFloatOrNull()?.toDouble()
+                    if (ratio != null && ratio > 0.0) {
                         customDialog = false
                         aspectRatio = CropAspectRatio.CUSTOM
+                        reshapeToRatio(if (ratio > 1.0) 1.0 / ratio else ratio)
                     }
                 }) { Text("Use") }
             },

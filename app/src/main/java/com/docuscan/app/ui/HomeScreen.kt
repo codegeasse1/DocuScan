@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,7 +30,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -62,15 +62,15 @@ fun HomeScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
     val scope = rememberCoroutineScope()
 
     val galleryLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
-        if (uri != null) {
+        ActivityResultContracts.PickMultipleVisualMedia()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
             scope.launch {
-                val bmp = withContext(Dispatchers.IO) {
-                    BitmapUtil.loadFromUri(context, uri, 2200)
+                val bitmaps = withContext(Dispatchers.IO) {
+                    uris.mapNotNull { BitmapUtil.loadFromUri(context, it, 2200) }
                 }
-                if (bmp != null) vm.addBitmap(bmp)
-                else snackbar.showSnackbar("Couldn't load that image")
+                if (bitmaps.isNotEmpty()) vm.addBitmaps(bitmaps)
+                else snackbar.showSnackbar("Couldn't load those images")
             }
         }
     }
@@ -223,30 +223,33 @@ private fun HeroCard(onCamera: () -> Unit, onGallery: () -> Unit) {
             color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
         )
         Spacer(Modifier.height(18.dp))
-        Row {
+        Row(Modifier.fillMaxWidth()) {
             Button(
                 onClick = onCamera,
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color.White.copy(alpha = 0.18f),
                     contentColor = MaterialTheme.colorScheme.onPrimary
                 )
             ) {
-                Icon(AppIcons.Camera, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Open Camera")
+                Icon(AppIcons.Camera, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Open Camera", maxLines = 1, softWrap = false)
             }
             Spacer(Modifier.width(10.dp))
-            OutlinedButton(
+            Button(
                 onClick = onGallery,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onPrimary),
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f)
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.White.copy(alpha = 0.18f),
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 )
             ) {
-                Icon(AppIcons.Gallery, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("From Gallery")
+                Icon(AppIcons.Gallery, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Gallery", maxLines = 1, softWrap = false)
             }
         }
     }
