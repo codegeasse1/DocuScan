@@ -2,7 +2,6 @@ package com.docuscan.app.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -144,7 +143,7 @@ fun CameraScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
                 buffer.get(bytes)
                 val rot = image.imageInfo.rotationDegrees
                 image.close()
-                val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                val decoded = BitmapUtil.decodeBytes(bytes, com.docuscan.app.DocViewModel.MAX_IMPORT_DIM)
                 val rotated = if (decoded != null && rot != 0) BitmapUtil.rotate(decoded, rot) else decoded
                 if (rotated != null) {
                     A11y.speak("Document scanned")

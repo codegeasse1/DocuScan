@@ -136,4 +136,23 @@ object BitmapUtil {
         }
         return BitmapFactory.decodeFile(path, o2)
     }
+
+    /**
+     * Decode JPEG/PNG bytes, downsampling only as much as needed to fit [maxDim] on the
+     * long edge. Two passes so a huge camera capture is never fully materialised just to
+     * be scaled down afterwards - saves a lot of memory and stays at full quality when
+     * the capture already fits.
+     */
+    fun decodeBytes(bytes: ByteArray, maxDim: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        while (bounds.outWidth / sample > maxDim || bounds.outHeight / sample > maxDim) sample *= 2
+        val o = BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
+    }
 }
