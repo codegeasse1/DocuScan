@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -37,6 +38,7 @@ import com.docuscan.app.BuildConfig
 import com.docuscan.app.DocViewModel
 import com.docuscan.app.data.AppSettings
 import com.docuscan.app.scan.FILTERS
+import com.docuscan.app.update.UpdateChecker
 import kotlinx.coroutines.launch
 
 @Composable
@@ -273,6 +275,46 @@ fun SettingsScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
             selected = s.theme == "dark",
             onClick = { vm.updateSettings(s.copy(theme = "dark")) }
         )
+
+        HorizontalDivider(Modifier.padding(vertical = 12.dp))
+        SectionTitle("Updates")
+        Text(
+            "DocuScan checks GitHub Releases for new versions when it starts.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (vm.noUpdateFound) {
+            Text(
+                "You're on the latest version.",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        val availableUpdate = vm.latestUpdate
+        if (availableUpdate != null) {
+            Button(onClick = { vm.openUpdateDialog() }) {
+                Text("Update to ${availableUpdate.versionName}")
+            }
+        } else {
+            OutlinedButton(
+                onClick = {
+                    if (!vm.updateChecking) {
+                        vm.beginUpdateCheck(manual = true)
+                        scope.launch {
+                            vm.finishUpdateCheck(
+                                runCatching { UpdateChecker.check() }.getOrNull(),
+                                manual = true
+                            )
+                        }
+                    }
+                },
+                enabled = !vm.updateChecking
+            ) {
+                Text(if (vm.updateChecking) "Checking…" else "Check for updates")
+            }
+        }
 
         HorizontalDivider(Modifier.padding(vertical = 12.dp))
         SectionTitle("About")

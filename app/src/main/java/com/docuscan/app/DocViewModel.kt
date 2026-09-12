@@ -13,6 +13,7 @@ import com.docuscan.app.data.AppSettings
 import com.docuscan.app.data.DocRecord
 import com.docuscan.app.data.HistoryStore
 import com.docuscan.app.scan.BitmapUtil
+import com.docuscan.app.update.UpdateInfo
 import java.util.concurrent.atomic.AtomicLong
 
 sealed class Screen {
@@ -64,6 +65,20 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
 
     /** When the camera is opened from the editor, returning lands back in the editor. */
     var returnToEditor by mutableStateOf(false)
+        private set
+
+    /** Update-check state, driven by the UI (which owns the coroutine scope). */
+    var latestUpdate by mutableStateOf<UpdateInfo?>(null)
+        private set
+    var updateChecking by mutableStateOf(false)
+        private set
+    var updateChecked by mutableStateOf(false)
+        private set
+    var showUpdateDialog by mutableStateOf(false)
+        private set
+
+    /** Set after a *manual* check finds nothing, so Settings can confirm "you're up to date". */
+    var noUpdateFound by mutableStateOf(false)
         private set
 
     init {
@@ -232,5 +247,29 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
     fun newDoc() {
         pages.clear()
         selectedPage = 0
+    }
+
+    fun beginUpdateCheck(manual: Boolean) {
+        updateChecking = true
+        if (manual) noUpdateFound = false
+    }
+
+    fun finishUpdateCheck(info: UpdateInfo?, manual: Boolean) {
+        updateChecking = false
+        updateChecked = true
+        latestUpdate = info
+        if (info != null) {
+            showUpdateDialog = true
+        } else if (manual) {
+            noUpdateFound = true
+        }
+    }
+
+    fun openUpdateDialog() {
+        if (latestUpdate != null) showUpdateDialog = true
+    }
+
+    fun dismissUpdateDialog() {
+        showUpdateDialog = false
     }
 }

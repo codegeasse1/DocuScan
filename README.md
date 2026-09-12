@@ -4,6 +4,17 @@ A modern, local-first Android document scanner. Capture or import images, apply 
 
 Built with **Kotlin + Jetpack Compose (Material 3) + CameraX**, modeled after the MakeACopy feature set.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/home.jpg" width="150" alt="Home" />
+  <img src="docs/screenshots/crop.jpg" width="150" alt="Auto-crop" />
+  <img src="docs/screenshots/editor.jpg" width="150" alt="Editor" />
+  <img src="docs/screenshots/save-menu.jpg" width="150" alt="Save menu" />
+  <img src="docs/screenshots/settings.jpg" width="150" alt="Settings" />
+</p>
+<p align="center"><sub>Home &nbsp;·&nbsp; Auto-crop &nbsp;·&nbsp; Editor &nbsp;·&nbsp; Save menu &nbsp;·&nbsp; Settings</sub></p>
+
 ## Features
 
 - 📷 **Camera capture** with in-app preview, flash & front/back flip (CameraX)
@@ -21,18 +32,21 @@ Built with **Kotlin + Jetpack Compose (Material 3) + CameraX**, modeled after th
 - 📄 **Export** — PDF with **page-format presets** (Fit-to-image, A4, US Letter, Legal) and **quality presets** (High/Standard/Small/Very small, 300/200/150/110 dpi, default **High**); JPG with **configurable quality (90–100%, default 100%) + color/B&W**
 - 📨 **Inbox Mode** — pick a folder (SAF) and every export is automatically saved there too — great for paperless-ngx / Syncthing / Nextcloud workflows
 - ♿ **Accessibility Mode** — spoken + haptic feedback and volume-key shutter in the camera
+- ⬆️ **In-app updates** — on launch DocuScan checks the GitHub Releases feed; when a newer build is published it shows an update dialog, downloads the new APK and hands it to the system installer (with a link to the release page for anyone who'd rather download manually)
 - 📤 **Share** with one tap (PDF or JPG)
 - 🗂️ **Document library** — browse, view, re-share or delete past scans, with **search over titles**
 - 📨 **Share-to-scan** — open an image from any app with "Send to DocuScan"
 - 🌙 **Modern Material 3 UI** with translucent "glass" control panels (so the document is never covered), light/dark/system theme
 
-Everything is processed **on-device** — no network calls, no accounts, no uploads.
+Scanning, filtering and export all happen **on-device** — no accounts and no uploads. The only network call is the update check against GitHub Releases described above (skipped silently if there's no connection).
 
 ## Download
 
 Grab the latest signed APK from the [Releases](https://github.com/codegeasse1/DocuScan/releases) tab — every push to `main` is auto-built and released by GitHub Actions.
 
-> Note: releases are signed with a fresh CI-generated key per build, so sideload updates require uninstalling the previous version first. (Set the `RELEASE_STORE_PASSWORD` / `RELEASE_KEY_PASSWORD` secrets to keep a stable key — generate it locally with `keytool -genkeypair -keystore keystore/release.jks -alias docuscan`.)
+> Releases are signed with DocuScan's shared signing key, so a new build installs **over** the previous one — no uninstall needed. Installs from before the shared key was introduced need a one-time uninstall.
+>
+> Maintainers: provide the `SIGNING_KEY` (base64-encoded keystore), `KEY_STORE_PASSWORD`, `KEY_PASSWORD` and `ALIAS` repository secrets. CI decodes the keystore, signs the release with it and verifies the APK signature before publishing. To rotate the key: `keytool -genkeypair -keystore release.jks -alias <alias> -keyalg RSA -keysize 2048 -validity 10000`, then `base64 -w0 release.jks` and update the secrets.
 
 ## Building locally
 
@@ -67,7 +81,8 @@ app/src/main/java/com/docuscan/app/
 │   ├── MediaSaver.kt      # MediaStore saves + inbox folder writes
 │   └── Exporter.kt        # Export pipeline (PDF/JPG + inbox mirror)
 ├── data/                  # History + settings persistence + PDF page-format/quality options
-├── ui/                    # Screens (Home, Camera, Editor, Crop, Documents, Settings)
+├── update/Updater.kt      # GitHub Releases update check + APK download/install
+├── ui/                    # Screens (Home, Camera, Editor, Crop, Documents, Settings) + UpdateDialog
 └── util/ShareUtil.kt      # Sharing via FileProvider
 ```
 

@@ -18,6 +18,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -26,7 +27,9 @@ import com.docuscan.app.ui.DocumentsScreen
 import com.docuscan.app.ui.EditorScreen
 import com.docuscan.app.ui.HomeScreen
 import com.docuscan.app.ui.SettingsScreen
+import com.docuscan.app.ui.UpdateDialog
 import com.docuscan.app.ui.theme.DocuScanTheme
+import com.docuscan.app.update.UpdateChecker
 
 @Composable
 fun App(vm: DocViewModel = viewModel()) {
@@ -37,6 +40,17 @@ fun App(vm: DocViewModel = viewModel()) {
     }
     DocuScanTheme(darkTheme = dark) {
         val snackbarHostState = remember { SnackbarHostState() }
+
+        // Check GitHub Releases once per app launch; a newer build opens the update dialog.
+        LaunchedEffect(Unit) {
+            if (!vm.updateChecked && !vm.updateChecking) {
+                vm.beginUpdateCheck(manual = false)
+                vm.finishUpdateCheck(
+                    runCatching { UpdateChecker.check() }.getOrNull(),
+                    manual = false
+                )
+            }
+        }
 
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
@@ -71,6 +85,12 @@ fun App(vm: DocViewModel = viewModel()) {
                 Screen.Camera -> vm.closeCamera()
                 Screen.Editor -> vm.selectTab(Tab.Home)
                 else -> Unit
+            }
+        }
+
+        if (vm.showUpdateDialog) {
+            vm.latestUpdate?.let { info ->
+                UpdateDialog(info = info, onDismiss = { vm.dismissUpdateDialog() })
             }
         }
     }
