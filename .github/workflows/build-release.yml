@@ -35,20 +35,23 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Generate signing keystore
+      - name: Prepare signing keystore
         shell: bash
         env:
-          KS_PASS: "${{ secrets.RELEASE_STORE_PASSWORD }}"
-          KEY_PASS: "${{ secrets.RELEASE_KEY_PASSWORD }}"
+          SIGNING_KEY: "${{ secrets.SIGNING_KEY }}"
+          RELEASE_KEY_ALIAS: "${{ secrets.ALIAS }}"
+          RELEASE_STORE_PASSWORD: "${{ secrets.KEY_STORE_PASSWORD }}"
+          RELEASE_KEY_PASSWORD: "${{ secrets.KEY_PASSWORD }}"
         run: |
           mkdir -p keystore
-          if [ ! -f keystore/release.jks ]; then
-            keytool -genkeypair -v -keystore keystore/release.jks \
-              -alias docuscan -keyalg RSA -keysize 2048 -validity 10000 \
-              -storepass "${KS_PASS:-DocuScanBuild2026}" \
-              -keypass "${KEY_PASS:-DocuScanBuild2026}" \
-              -dname "CN=DocuScan, OU=DocuScan, O=DocuScan, L=Internet, ST=Internet, C=US"
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::error::SIGNING_KEY secret is not set. Refusing to build an inconsistently-signed APK (users would have to uninstall to update)."
+            exit 1
           fi
+          printf '%s' "$SIGNING_KEY" | base64 -d > keystore/release.jks
+          echo "Decoded keystore: $(wc -c < keystore/release.jks) bytes"
+          echo "Keystore aliases:"
+          keytool -list -keystore keystore/release.jks -storepass "$RELEASE_STORE_PASSWORD" | sed -n '1,25p'
 
       - name: Compute version
         id: version
@@ -57,7 +60,7 @@ jobs:
           Y=$(date +%Y)
           M=$(date +%-m)
           D=$(date +%-d)
-          CODE="$(( (10#$Y) * 100000 + (10#$M) * 1000 + (10#$D) * 10 + (GITHUB_RUN_NUMBER % 10) ))"
+          CODE="$(( (10#$Y) * 1000000 + (10#$M) * 10000 + (10#$D) * 100 + (GITHUB_RUN_NUMBER % 100) ))"
           echo "version_code=$CODE" >> "$GITHUB_OUTPUT"
           echo "version_name=1.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
           echo "tag=v1.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
@@ -68,11 +71,19 @@ jobs:
           VERSION_CODE: "${{ steps.version.outputs.version_code }}"
           VERSION_NAME: "${{ steps.version.outputs.version_name }}"
           RELEASE_STORE_FILE: keystore/release.jks
-          RELEASE_STORE_PASSWORD: "${{ secrets.RELEASE_STORE_PASSWORD }}"
-          RELEASE_KEY_PASSWORD: "${{ secrets.RELEASE_KEY_PASSWORD }}"
+          RELEASE_STORE_PASSWORD: "${{ secrets.KEY_STORE_PASSWORD }}"
+          RELEASE_KEY_PASSWORD: "${{ secrets.KEY_PASSWORD }}"
+          RELEASE_KEY_ALIAS: "${{ secrets.ALIAS }}"
         run: |
           set -o pipefail
           ./gradlew :app:assembleRelease --stacktrace --console=plain 2>&1 | tee /tmp/gradle.log
+
+      - name: Verify APK signature
+        shell: bash
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          BT="$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n1)"
+          "$ANDROID_HOME/build-tools/$BT/apksigner" verify --print-certs "$APK" | sed -n '1,12p'
 
       - name: Report build failure as issue
         if: failure()
