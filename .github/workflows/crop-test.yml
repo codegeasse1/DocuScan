@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - fix/document-crop-interaction
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
