@@ -108,6 +108,10 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
         cameraPreferredForSession = enabled
     }
 
+    fun consumeAutoCropNextPage() {
+        autoCropNextPage = false
+    }
+
     fun closeCamera() {
         screen = if (returnToEditor) Screen.Editor else Screen.Tabs
     }
