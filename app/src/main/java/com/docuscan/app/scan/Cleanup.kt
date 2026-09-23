@@ -301,7 +301,7 @@ object Cleanup {
             Imgproc.GaussianBlur(gray, gray, Size(5.0, 5.0), 0.0)
             Core.normalize(gray, normalized, 0.0, 255.0, Core.NORM_MINMAX)
 
-            val meanValue = Core.mean(gray).get(0, 0)[0]
+            val meanValue = Core.mean(gray).`val`[0]
             Imgproc.Canny(
                 gray, edges,
                 max(10.0, 0.66 * meanValue),
