@@ -72,35 +72,51 @@ object WarpTarget {
         return w to h
     }
 
-    /** Projective aspect-ratio estimate with heuristic fallback. */
-    private fun computeWarpTargetSizeProjective(corners: Array<android.graphics.PointF>, srcWidth: Int, srcHeight: Int): Pair<Int, Int> {
+    /**
+     * AUTO output sizing for a manually/automatically selected document quad.
+     *
+     * The destination rectangle must have roughly the same aspect ratio as the
+     * selected quadrilateral. A previous projective-aspect implementation could
+     * return a wildly different ratio for ordinary phone photos (for example
+     * ~0.3 for a ~0.7 portrait page), which made the perspective warp squeeze
+     * the final scan horizontally even though the crop overlay looked correct.
+     *
+     * OpenCV's standard scanner pipeline uses the measured top/bottom and
+     * left/right edge lengths to choose the warp canvas. We do the same here,
+     * using the mean edge lengths for stability and the longest side for output
+     * resolution. The homography still performs the actual perspective
+     * correction; this function only chooses the destination canvas shape.
+     */
+    private fun computeWarpTargetSizeProjective(
+        corners: Array<android.graphics.PointF>,
+        srcWidth: Int,
+        srcHeight: Int
+    ): Pair<Int, Int> {
         val wTop = distance(corners[0], corners[1])
         val wBottom = distance(corners[2], corners[3])
         val hLeft = distance(corners[0], corners[3])
         val hRight = distance(corners[1], corners[2])
         val meanW = 0.5 * (wTop + wBottom)
         val meanH = 0.5 * (hLeft + hRight)
-        val longPx = max(max(wTop, wBottom), max(hLeft, hRight))
-        if (longPx < 1.0) return 1 to 1
-
-        val widthOverHeight = estimateProjectiveAspectRatio(corners, srcWidth, srcHeight)
-        if (widthOverHeight == null || !widthOverHeight.isFinite() ||
-            widthOverHeight <= 0.0 || widthOverHeight > 100.0 || widthOverHeight < 0.01
-        ) {
+        if (!meanW.isFinite() || !meanH.isFinite() || meanW < 1.0 || meanH < 1.0) {
             return computeWarpTargetSize(corners)
         }
 
-        val landscapeQuad = meanW >= meanH
-        val w: Int
-        val h: Int
-        if (landscapeQuad) {
-            w = Math.round(longPx).toInt()
-            h = Math.round(longPx / widthOverHeight).toInt()
+        // Keep AUTO tied to the geometry the user can actually see. This also
+        // avoids an accidental portrait/landscape flip when detection is skewed.
+        val longPx = max(meanW, meanH)
+        val aspect = (meanW / meanH).coerceIn(0.05, 20.0)
+        val landscape = meanW >= meanH
+        val outW: Int
+        val outH: Int
+        if (landscape) {
+            outW = Math.round(longPx).toInt()
+            outH = Math.round(longPx / aspect).toInt()
         } else {
-            h = Math.round(longPx).toInt()
-            w = Math.round(longPx * widthOverHeight).toInt()
+            outH = Math.round(longPx).toInt()
+            outW = Math.round(longPx * aspect).toInt()
         }
-        return max(1, w) + 1 to max(1, h) + 1
+        return max(2, outW + 1) to max(2, outH + 1)
     }
 
     /**
