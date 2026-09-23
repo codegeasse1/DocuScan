@@ -104,7 +104,7 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
         screen = Screen.Camera
     }
 
-    fun setCameraPreferredForSession(enabled: Boolean) {
+    fun updateCameraPreferredForSession(enabled: Boolean) {
         cameraPreferredForSession = enabled
     }
 
