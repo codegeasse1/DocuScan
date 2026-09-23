@@ -643,6 +643,110 @@ object Cleanup {
 
     private fun distance(a: Point, b: Point): Double = Math.hypot(a.x - b.x, a.y - b.y)
 
+    /**
+     * Refines one document corner from a user-provided point.
+     *
+     * The user can tap close to the real paper corner even when the automatic
+     * quadrilateral is slightly wrong. We inspect a local ROI, find strong
+     * Harris/Shi-Tomasi corners, sub-pixel refine them, and choose the candidate
+     * that balances proximity to the tap with local corner strength.
+     */
+    fun refineCornerNear(src: Bitmap, tapX: Float, tapY: Float, radiusPx: Float = 180f): PointF? {
+        if (!ensureLoaded()) return null
+        if (tapX !in 0f..src.width.toFloat() || tapY !in 0f..src.height.toFloat()) return null
+
+        val rgba = Mat()
+        val gray = Mat()
+        try {
+            Utils.bitmapToMat(src, rgba)
+            Imgproc.cvtColor(rgba, gray, Imgproc.COLOR_RGBA2GRAY)
+
+            val radius = radiusPx.coerceIn(48f, 320f)
+            val left = max(0, (tapX - radius).toInt())
+            val top = max(0, (tapY - radius).toInt())
+            val right = min(gray.cols(), (tapX + radius).toInt() + 1)
+            val bottom = min(gray.rows(), (tapY + radius).toInt() + 1)
+            if (right - left < 24 || bottom - top < 24) return null
+
+            val roi = gray.submat(top, bottom, left, right)
+            val smooth = Mat()
+            val corners = MatOfPoint()
+            val refined = MatOfPoint2f()
+            try {
+                Imgproc.GaussianBlur(roi, smooth, Size(3.0, 3.0), 0.0)
+                Imgproc.goodFeaturesToTrack(
+                    smooth,
+                    corners,
+                    32,
+                    0.005,
+                    8.0,
+                    Mat(),
+                    7,
+                    true,
+                    0.04
+                )
+                if (corners.empty()) return null
+
+                val pts = corners.toArray()
+                val local2f = MatOfPoint2f(*pts.map { Point(it.x, it.y) }.toTypedArray())
+                try {
+                    Imgproc.cornerSubPix(
+                        smooth,
+                        local2f,
+                        Size(5.0, 5.0),
+                        Size(-1.0, -1.0),
+                        org.opencv.core.TermCriteria(
+                            org.opencv.core.TermCriteria.EPS + org.opencv.core.TermCriteria.MAX_ITER,
+                            30,
+                            0.01
+                        )
+                    )
+                    val refinedPts = local2f.toArray()
+                    if (refinedPts.isEmpty()) return null
+
+                    var best: Point? = null
+                    var bestScore = Double.POSITIVE_INFINITY
+                    val tapLocalX = tapX - left
+                    val tapLocalY = tapY - top
+
+                    for (p in refinedPts) {
+                        val dx = p.x - tapLocalX
+                        val dy = p.y - tapLocalY
+                        val dist = Math.hypot(dx, dy)
+                        if (dist > radius * 0.95) continue
+
+                        // Prefer points close to the user's tap. A small gradient
+                        // check rejects many text/texture corners.
+                        val ix = p.x.toInt().coerceIn(2, smooth.cols() - 3)
+                        val iy = p.y.toInt().coerceIn(2, smooth.rows() - 3)
+                        val gx = abs(smooth.get(iy, ix + 2)[0] - smooth.get(iy, ix - 2)[0])
+                        val gy = abs(smooth.get(iy + 2, ix)[0] - smooth.get(iy - 2, ix)[0])
+                        val strength = gx + gy
+                        val score = dist - min(80.0, strength * 0.12)
+                        if (score < bestScore) {
+                            bestScore = score
+                            best = Point(p.x + left, p.y + top)
+                        }
+                    }
+
+                    return best?.let { PointF(it.x.toFloat(), it.y.toFloat()) }
+                } finally {
+                    local2f.release()
+                }
+            } finally {
+                roi.release()
+                smooth.release()
+                corners.release()
+                refined.release()
+            }
+        } catch (_: Throwable) {
+            return null
+        } finally {
+            rgba.release()
+            gray.release()
+        }
+    }
+
     private fun isLowLight(rgba: Mat): Boolean {
         val gray = Mat()
         try {
