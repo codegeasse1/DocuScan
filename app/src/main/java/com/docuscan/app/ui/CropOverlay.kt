@@ -188,41 +188,40 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
     }
 
 
-    suspend fun refineCornerAtViewPoint(viewX: Float, viewY: Float): Boolean {
+    /** 
+     * A tap is an explicit crop-corner placement, not a request to run a
+     * second edge detector. The user can therefore move a badly detected
+     * corner by tapping the real page corner even when it is far outside the
+     * current crop polygon.
+     *
+     * The image is divided into four quadrants to decide which corner the
+     * tap controls. The corner is then placed EXACTLY at the tap location.
+     * Dragging remains available for pixel-level fine tuning.
+     */
+    fun moveCornerToTap(viewX: Float, viewY: Float) {
         val f = fit
-        if (f.width <= 1f || f.height <= 1f) return false
+        if (f.width <= 1f || f.height <= 1f) return
 
-        // Convert the tap from the displayed image into original bitmap pixels.
-        val imageX = ((viewX - f.left) / f.width * rotBitmap.width)
-            .coerceIn(0f, rotBitmap.width.toFloat())
-        val imageY = ((viewY - f.top) / f.height * rotBitmap.height)
-            .coerceIn(0f, rotBitmap.height.toFloat())
+        val x = viewX.coerceIn(f.left, f.right)
+        val y = viewY.coerceIn(f.top, f.bottom)
 
-        refiningCorner = true
-        val refined = withContext(Dispatchers.Default) {
-            runCatching { Cleanup.refineCornerNear(rotBitmap, imageX, imageY) }.getOrNull()
-        }
-        refiningCorner = false
+        val centerX = (f.left + f.right) * 0.5f
+        val centerY = (f.top + f.bottom) * 0.5f
 
-        if (refined == null) return false
-
-        // If the auto box is badly displaced, nearest-corner is unreliable.
-        // Use the tap's position relative to the current crop center to choose
-        // the intended TL/TR/BR/BL corner.
-        val imageCenterX = (f.left + f.right) * 0.5f
-        val imageCenterY = (f.top + f.bottom) * 0.5f
         val target = when {
-            viewX < imageCenterX && viewY < imageCenterY -> 0
-            viewX >= imageCenterX && viewY < imageCenterY -> 1
-            viewX >= imageCenterX && viewY >= imageCenterY -> 2
-            else -> 3
+            x < centerX && y < centerY -> 0 // TL
+            x >= centerX && y < centerY -> 1 // TR
+            x >= centerX && y >= centerY -> 2 // BR
+            else -> 3                         // BL
         }
 
-        norm[target * 2] = (refined.x / rotBitmap.width).coerceIn(0f, 1f)
-        norm[target * 2 + 1] = (refined.y / rotBitmap.height).coerceIn(0f, 1f)
-        hint = "Corner refined — tap another corner if needed, or drag to fine-tune."
-        return true
+        setViewCorner(target, x, y)
+
+        for (i in 0..3) snapActive[i] = false
+        snapHighlight = -1
+        hint = "Corner moved — tap another page corner or drag to fine-tune."
     }
+
 
     fun selectPreset(r: CropAspectRatio) {
         when (r) {
@@ -358,12 +357,12 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
 
                             dragCorner = selectedCorner
 
-                            // EDGE: a real drag moves the entire edge; a simple tap
-                            // performs guided correction at the exact tap location.
+                            // Existing edge: drag it. A simple tap on an edge is
+                            // still treated as a normal "tap anywhere" placement.
                             if (selectedCorner < 0 && selectedEdge >= 0) {
                                 val firstDrag = awaitDragOrCancellation(down.id)
                                 if (firstDrag == null) {
-                                    scope.launch { refineCornerAtViewPoint(pos.x, pos.y) }
+                                    moveCornerToTap(pos.x, pos.y)
                                 } else {
                                     fun applyEdge(current: Offset) {
                                         val ed = edgeDrag ?: return
@@ -381,7 +380,6 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
 
                                     applyEdge(firstDrag.position)
                                     firstDrag.consume()
-
                                     drag(down.id) { change ->
                                         applyEdge(change.position)
                                         change.consume()
@@ -395,25 +393,24 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
                                 return@awaitEachGesture
                             }
 
-                            // IMAGE: any tap that is not on a corner/edge is a guided
-                            // corner correction. It is intentionally not tied to the
-                            // current crop border.
+                            // Tap anywhere not on an existing handle = move the
+                            // appropriate corner EXACTLY to the tap. No OpenCV
+                            // search is allowed to reject or relocate this tap.
                             if (selectedCorner < 0) {
                                 val firstDrag = awaitDragOrCancellation(down.id)
                                 if (firstDrag == null) {
-                                    scope.launch { refineCornerAtViewPoint(pos.x, pos.y) }
+                                    moveCornerToTap(pos.x, pos.y)
                                 }
-
                                 dragCorner = -1
                                 edgeDrag = null
                                 return@awaitEachGesture
                             }
 
-                            // CORNER: drag = manual corner movement; tap = guided
-                            // detection at that location.
+                            // Existing corner: drag = manual movement; tap = move
+                            // that corner exactly to the tapped position.
                             val firstDrag = awaitDragOrCancellation(down.id)
                             if (firstDrag == null) {
-                                scope.launch { refineCornerAtViewPoint(pos.x, pos.y) }
+                                moveCornerToTap(pos.x, pos.y)
                                 dragCorner = -1
                                 edgeDrag = null
                                 for (i in 0..3) snapActive[i] = false
@@ -445,7 +442,6 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
 
                             applyCorner(firstDrag.position)
                             firstDrag.consume()
-
                             drag(down.id) { change ->
                                 applyCorner(change.position)
                                 change.consume()
@@ -456,6 +452,7 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
                             for (i in 0..3) snapActive[i] = false
                             snapHighlight = -1
                         }
+}
                     }
             ) {
                 val f = fit
