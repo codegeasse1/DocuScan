@@ -27,7 +27,7 @@ object Cleanup {
 
     const val KERNEL_FRACTION_BW = 0.08
     const val KERNEL_FRACTION_OCR = 0.03
-    private const val DETECTION_MAX_EDGE = 720
+    private const val DETECTION_MAX_EDGE = 960
 
     @Volatile
     private var loaded = false
@@ -294,6 +294,7 @@ object Cleanup {
         val edgesAlt = Mat()
         val threshold = Mat()
         val thresholdInv = Mat()
+        val closed = Mat()
 
         try {
             Utils.bitmapToMat(bitmap, rgba)
@@ -304,8 +305,8 @@ object Cleanup {
             val meanValue = Core.mean(gray).`val`[0]
             Imgproc.Canny(
                 gray, edges,
-                max(10.0, 0.66 * meanValue),
-                min(255.0, max(40.0, 1.33 * meanValue))
+                max(8.0, 0.55 * meanValue),
+                min(255.0, max(45.0, 1.45 * meanValue))
             )
 
             val adaptive = Mat()
@@ -313,91 +314,96 @@ object Cleanup {
             Core.bitwise_or(edges, adaptive, edgesAlt)
             adaptive.release()
 
-            Imgproc.threshold(
-                normalized, threshold, 0.0, 255.0,
-                Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU
-            )
-            Imgproc.threshold(
-                normalized, thresholdInv, 0.0, 255.0,
-                Imgproc.THRESH_BINARY_INV + Imgproc.THRESH_OTSU
-            )
+            Imgproc.threshold(normalized, threshold, 0.0, 255.0,
+                Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU)
+            Imgproc.threshold(normalized, thresholdInv, 0.0, 255.0,
+                Imgproc.THRESH_BINARY_INV + Imgproc.THRESH_OTSU)
 
-            val shortSide = min(rgba.width(), rgba.height())
-            var kernelSize = max(3, shortSide / 70)
-            if (kernelSize % 2 == 0) kernelSize++
+            val k = max(5, min(rgba.width(), rgba.height()) / 45)
+            val kernelSize = if (k % 2 == 0) k + 1 else k
             val kernel = Imgproc.getStructuringElement(
                 Imgproc.MORPH_RECT,
                 Size(kernelSize.toDouble(), kernelSize.toDouble())
             )
+            Imgproc.morphologyEx(edgesAlt, closed, Imgproc.MORPH_CLOSE, kernel)
             Imgproc.morphologyEx(threshold, threshold, Imgproc.MORPH_CLOSE, kernel)
             Imgproc.morphologyEx(thresholdInv, thresholdInv, Imgproc.MORPH_CLOSE, kernel)
             kernel.release()
 
             val binaryEdges = Mat()
             val binaryEdgesInv = Mat()
-            Imgproc.Canny(threshold, binaryEdges, 50.0, 150.0)
-            Imgproc.Canny(thresholdInv, binaryEdgesInv, 50.0, 150.0)
+            Imgproc.Canny(threshold, binaryEdges, 30.0, 120.0)
+            Imgproc.Canny(thresholdInv, binaryEdgesInv, 30.0, 120.0)
 
-            val maps = listOf(edges, edgesAlt, binaryEdges, binaryEdgesInv)
+            val maps = listOf(edges, edgesAlt, closed, binaryEdges, binaryEdgesInv)
             val imgArea = rgba.width() * rgba.height().toDouble()
             var bestScore = -1.0
             var bestQuad: Array<Point>? = null
 
             for (edgeMap in maps) {
-                val localContours = mutableListOf<MatOfPoint>()
+                val contours = mutableListOf<MatOfPoint>()
                 val hierarchy = Mat()
                 try {
-                    Imgproc.findContours(edgeMap, localContours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE)
-                    for (contour in localContours) {
+                    Imgproc.findContours(edgeMap, contours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE)
+                    for (contour in contours) {
                         val area = Imgproc.contourArea(contour)
-                        if (area < imgArea * 0.025) continue
+                        if (area < imgArea * 0.04) continue
 
                         val curve = MatOfPoint2f(*contour.toArray())
-                        val approx = MatOfPoint2f()
                         try {
                             val perimeter = Imgproc.arcLength(curve, true)
-                            Imgproc.approxPolyDP(curve, approx, perimeter * 0.018, true)
-                            if (approx.total() != 4L) continue
+                            for (epsilon in doubleArrayOf(0.010, 0.015, 0.022, 0.030)) {
+                                val approx = MatOfPoint2f()
+                                try {
+                                    Imgproc.approxPolyDP(curve, approx, perimeter * epsilon, true)
+                                    if (approx.total() != 4L) continue
 
-                            val approxPoints = approx.toArray()
-                            val approxAsPoints = MatOfPoint(*approxPoints)
-                            val convex = Imgproc.isContourConvex(approxAsPoints)
-                            approxAsPoints.release()
-                            if (!convex) continue
+                                    val ap = approx.toArray()
+                                    val convexMat = MatOfPoint(*ap)
+                                    val convex = Imgproc.isContourConvex(convexMat)
+                                    convexMat.release()
+                                    if (!convex) continue
 
-                            val quad = sortPointsRobust(approxPoints)
-                            if (!quadIsUsable(quad, rgba.width(), rgba.height())) continue
+                                    val quad = sortPointsRobust(ap)
+                                    if (!quadIsUsable(quad, rgba.width(), rgba.height())) continue
 
-                            val quadAreaValue = quadArea(quad)
-                            val areaNorm = (quadAreaValue / imgArea).coerceIn(0.0, 1.0)
-                            val rectangularity = rectangularityScore(quad)
-                            val edgeContact = edgeContactScore(quad, rgba.width(), rgba.height())
-                            val score = areaNorm * 0.55 + rectangularity * 0.30 + edgeContact * 0.15
+                                    val areaNorm = (quadArea(quad) / imgArea).coerceIn(0.0, 1.0)
+                                    val rectangularity = rectangularityScore(quad)
+                                    val edgeSupport = quadEdgeSupport(quad, edgeMap)
+                                    val centerScore = quadCenterScore(quad, rgba.width(), rgba.height())
 
-                            if (score > bestScore) {
-                                bestScore = score
-                                bestQuad = quad
+                                    val score =
+                                        areaNorm * 0.35 +
+                                        rectangularity * 0.25 +
+                                        edgeSupport * 0.30 +
+                                        centerScore * 0.10
+
+                                    if (score > bestScore) {
+                                        bestScore = score
+                                        bestQuad = quad
+                                    }
+                                } finally {
+                                    approx.release()
+                                }
                             }
                         } finally {
                             curve.release()
-                            approx.release()
                         }
                     }
                 } finally {
-                    localContours.forEach { it.release() }
+                    contours.forEach { it.release() }
                     hierarchy.release()
                 }
             }
 
-            if (bestQuad != null && bestScore >= 0.20) {
+            if (bestQuad != null && bestScore >= 0.34) {
                 return bestQuad!!.map { PointF(it.x.toFloat(), it.y.toFloat()) }
             }
 
-            val houghQuad = detectQuadFromHoughLines(edgesAlt, rgba.width(), rgba.height())
-            if (houghQuad != null) {
-                return houghQuad.map { PointF(it.x.toFloat(), it.y.toFloat()) }
+            for (map in listOf(edgesAlt, closed, edges)) {
+                val q = detectQuadFromHoughLines(map, rgba.width(), rgba.height())
+                if (q != null) return q.map { PointF(it.x.toFloat(), it.y.toFloat()) }
             }
-
             return null
         } finally {
             rgba.release()
@@ -407,7 +413,51 @@ object Cleanup {
             edgesAlt.release()
             threshold.release()
             thresholdInv.release()
+            closed.release()
         }
+    }
+
+    private fun quadEdgeSupport(q: Array<Point>, edges: Mat): Double {
+        if (q.size != 4 || edges.empty()) return 0.0
+        var total = 0
+        var hit = 0
+        val w = edges.cols()
+        val h = edges.rows()
+        for (i in 0..3) {
+            val a = q[i]
+            val b = q[(i + 1) % 4]
+            val len = distance(a, b)
+            val samples = max(24, min(160, (len / 4.0).toInt()))
+            for (s in 0..samples) {
+                val t = s.toDouble() / samples.toDouble()
+                val x = (a.x + (b.x - a.x) * t).toInt()
+                val y = (a.y + (b.y - a.y) * t).toInt()
+                var supported = false
+                for (dy in -2..2) {
+                    for (dx in -2..2) {
+                        val xx = (x + dx).coerceIn(0, w - 1)
+                        val yy = (y + dy).coerceIn(0, h - 1)
+                        val pixel = edges.get(yy, xx)
+                        if (pixel != null && pixel.isNotEmpty() && pixel[0] > 0.0) {
+                            supported = true
+                            break
+                        }
+                    }
+                    if (supported) break
+                }
+                total++
+                if (supported) hit++
+            }
+        }
+        return if (total == 0) 0.0 else (hit.toDouble() / total).coerceIn(0.0, 1.0)
+    }
+
+    private fun quadCenterScore(q: Array<Point>, width: Int, height: Int): Double {
+        val cx = q.map { it.x }.average()
+        val cy = q.map { it.y }.average()
+        val dx = abs(cx - width / 2.0) / (width / 2.0)
+        val dy = abs(cy - height / 2.0) / (height / 2.0)
+        return (1.0 - ((dx + dy) / 2.0)).coerceIn(0.0, 1.0)
     }
 
     private fun quadIsUsable(q: Array<Point>, width: Int, height: Int): Boolean {
