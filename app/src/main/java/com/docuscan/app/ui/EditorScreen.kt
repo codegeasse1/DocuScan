@@ -207,7 +207,7 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
                 Row {
                     TextButton(onClick = {
                         addDialog = false
-                        vm.setCameraPreferredForSession(rememberCameraForSession)
+                        vm.updateCameraPreferredForSession(rememberCameraForSession)
                         vm.openCamera(fromEditor = true, autoCrop = true)
                     }) {
                         Icon(AppIcons.Camera, contentDescription = null)
