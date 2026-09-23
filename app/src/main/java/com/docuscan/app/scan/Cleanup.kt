@@ -289,102 +289,163 @@ object Cleanup {
     private fun detectCornersDetailed(bitmap: Bitmap): List<PointF>? {
         val rgba = Mat()
         val gray = Mat()
-        val threshold = Mat()
-        val morph = Mat()
+        val normalized = Mat()
         val edges = Mat()
-        val edgesCopy = Mat()
-        val hierarchy = Mat()
-        val contours = mutableListOf<MatOfPoint>()
+        val edgesAlt = Mat()
+        val threshold = Mat()
+        val thresholdInv = Mat()
+
         try {
             Utils.bitmapToMat(bitmap, rgba)
             Imgproc.cvtColor(rgba, gray, Imgproc.COLOR_RGBA2GRAY)
             Imgproc.GaussianBlur(gray, gray, Size(5.0, 5.0), 0.0)
-            Imgproc.threshold(gray, threshold, 0.0, 255.0, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU)
+            Core.normalize(gray, normalized, 0.0, 255.0, Core.NORM_MINMAX)
+
+            val meanValue = Core.mean(gray).get(0, 0)[0]
+            Imgproc.Canny(
+                gray, edges,
+                max(10.0, 0.66 * meanValue),
+                min(255.0, max(40.0, 1.33 * meanValue))
+            )
+
+            val adaptive = Mat()
+            edgesAdaptive(normalized, adaptive)
+            Core.bitwise_or(edges, adaptive, edgesAlt)
+            adaptive.release()
+
+            Imgproc.threshold(
+                normalized, threshold, 0.0, 255.0,
+                Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU
+            )
+            Imgproc.threshold(
+                normalized, thresholdInv, 0.0, 255.0,
+                Imgproc.THRESH_BINARY_INV + Imgproc.THRESH_OTSU
+            )
 
             val shortSide = min(rgba.width(), rgba.height())
-            var kernelSize = max(5, shortSide / 50)
+            var kernelSize = max(3, shortSide / 70)
             if (kernelSize % 2 == 0) kernelSize++
-            val kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(kernelSize.toDouble(), kernelSize.toDouble()))
-            Imgproc.morphologyEx(threshold, morph, Imgproc.MORPH_CLOSE, kernel)
+            val kernel = Imgproc.getStructuringElement(
+                Imgproc.MORPH_RECT,
+                Size(kernelSize.toDouble(), kernelSize.toDouble())
+            )
+            Imgproc.morphologyEx(threshold, threshold, Imgproc.MORPH_CLOSE, kernel)
+            Imgproc.morphologyEx(thresholdInv, thresholdInv, Imgproc.MORPH_CLOSE, kernel)
             kernel.release()
 
-            val median = Core.mean(gray).`val`[0]
-            val cannyLower = max(0.0, 0.66 * median)
-            val cannyUpper = min(255.0, 1.33 * median)
-            Imgproc.Canny(morph, edges, cannyLower, cannyUpper)
+            val binaryEdges = Mat()
+            val binaryEdgesInv = Mat()
+            Imgproc.Canny(threshold, binaryEdges, 50.0, 150.0)
+            Imgproc.Canny(thresholdInv, binaryEdgesInv, 50.0, 150.0)
 
-            val edgesAuto = Mat()
-            edgesAdaptive(gray, edgesAuto)
-            Core.max(edges, edgesAuto, edges)
-            edgesAuto.release()
-
-            val low = isLowLight(rgba)
-            if (low) {
-                val ll = rgba.clone()
-                preprocessLowLight(ll)
-                val llGray = Mat()
-                Imgproc.cvtColor(ll, llGray, Imgproc.COLOR_RGBA2GRAY)
-                val edges2 = Mat()
-                edgesAdaptive(llGray, edges2)
-                val k3 = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0))
-                Imgproc.dilate(edges2, edges2, k3)
-                k3.release()
-                Core.max(edges, edges2, edges)
-                edges2.release(); llGray.release(); ll.release()
-            }
-
-            edges.copyTo(edgesCopy)
-            Imgproc.findContours(edgesCopy, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
-
+            val maps = listOf(edges, edgesAlt, binaryEdges, binaryEdgesInv)
             val imgArea = rgba.width() * rgba.height().toDouble()
             var bestScore = -1.0
-            var bestQuad: List<PointF>? = null
+            var bestQuad: Array<Point>? = null
 
-            for (contour in contours) {
-                val area = Imgproc.contourArea(contour)
-                if (area < imgArea * 0.08) continue
-                val curve = MatOfPoint2f(*contour.toArray())
-                val approx = MatOfPoint2f()
+            for (edgeMap in maps) {
+                val localContours = mutableListOf<MatOfPoint>()
+                val hierarchy = Mat()
                 try {
-                    Imgproc.approxPolyDP(curve, approx, Imgproc.arcLength(curve, true) * 0.015, true)
-                    val approxAsPoints = MatOfPoint(*approx.toArray())
-                    val isConvex = Imgproc.isContourConvex(approxAsPoints)
-                    approxAsPoints.release()
-                    if (approx.total() == 4L && isConvex) {
-                        val quad = sortPointsRobust(approx.toArray())
-                        val w1 = distance(quad[0], quad[1])
-                        val w2 = distance(quad[2], quad[3])
-                        val h1 = distance(quad[1], quad[2])
-                        val h2 = distance(quad[3], quad[0])
-                        val avgWidth = (w1 + w2) / 2.0
-                        val avgHeight = (h1 + h2) / 2.0
-                        val aspectRatio = avgHeight / (avgWidth + 1e-9)
-                        val areaNorm = area / imgArea
-                        val rectRaw = rectScore(quad)
-                        if (rectRaw < 0.0) continue
-                        val rect = rectRaw / 120.0
-                        val score = 0.6 * areaNorm + 0.4 * rect
-                        if (aspectRatio > 0.5 && aspectRatio < 2.5 && score > bestScore) {
-                            bestScore = score
-                            bestQuad = quad.map { PointF(it.x.toFloat(), it.y.toFloat()) }
+                    Imgproc.findContours(edgeMap, localContours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE)
+                    for (contour in localContours) {
+                        val area = Imgproc.contourArea(contour)
+                        if (area < imgArea * 0.025) continue
+
+                        val curve = MatOfPoint2f(*contour.toArray())
+                        val approx = MatOfPoint2f()
+                        try {
+                            val perimeter = Imgproc.arcLength(curve, true)
+                            Imgproc.approxPolyDP(curve, approx, perimeter * 0.018, true)
+                            if (approx.total() != 4L) continue
+
+                            val approxPoints = approx.toArray()
+                            val approxAsPoints = MatOfPoint(*approxPoints)
+                            val convex = Imgproc.isContourConvex(approxAsPoints)
+                            approxAsPoints.release()
+                            if (!convex) continue
+
+                            val quad = sortPointsRobust(approxPoints)
+                            if (!quadIsUsable(quad, rgba.width(), rgba.height())) continue
+
+                            val quadAreaValue = quadArea(quad)
+                            val areaNorm = (quadAreaValue / imgArea).coerceIn(0.0, 1.0)
+                            val rectangularity = rectangularityScore(quad)
+                            val edgeContact = edgeContactScore(quad, rgba.width(), rgba.height())
+                            val score = areaNorm * 0.55 + rectangularity * 0.30 + edgeContact * 0.15
+
+                            if (score > bestScore) {
+                                bestScore = score
+                                bestQuad = quad
+                            }
+                        } finally {
+                            curve.release()
+                            approx.release()
                         }
                     }
                 } finally {
-                    curve.release(); approx.release()
+                    localContours.forEach { it.release() }
+                    hierarchy.release()
                 }
             }
 
-            if (bestQuad != null) return bestQuad
+            if (bestQuad != null && bestScore >= 0.20) {
+                return bestQuad!!.map { PointF(it.x.toFloat(), it.y.toFloat()) }
+            }
 
-            val houghQuad = detectQuadFromHoughLines(edges, rgba.width(), rgba.height())
-            if (houghQuad != null) return houghQuad.map { PointF(it.x.toFloat(), it.y.toFloat()) }
+            val houghQuad = detectQuadFromHoughLines(edgesAlt, rgba.width(), rgba.height())
+            if (houghQuad != null) {
+                return houghQuad.map { PointF(it.x.toFloat(), it.y.toFloat()) }
+            }
 
             return null
         } finally {
-            contours.forEach { runCatching { it.release() } }
-            rgba.release(); gray.release(); threshold.release(); morph.release()
-            edges.release(); edgesCopy.release(); hierarchy.release()
+            rgba.release()
+            gray.release()
+            normalized.release()
+            edges.release()
+            edgesAlt.release()
+            threshold.release()
+            thresholdInv.release()
         }
+    }
+
+    private fun quadIsUsable(q: Array<Point>, width: Int, height: Int): Boolean {
+        if (q.size != 4) return false
+        val imageArea = width.toDouble() * height.toDouble()
+        if (quadArea(q) < imageArea * 0.025) return false
+
+        for (i in 0..3) {
+            val a = q[i]
+            val b = q[(i + 1) % 4]
+            if (distance(a, b) < min(width, height) * 0.025) return false
+            val prev = q[(i + 3) % 4]
+            val next = q[(i + 1) % 4]
+            val cornerAngle = angle(prev, a, next)
+            if (cornerAngle.isNaN() || cornerAngle < 22.0 || cornerAngle > 158.0) return false
+        }
+        return true
+    }
+
+    private fun rectangularityScore(q: Array<Point>): Double {
+        if (q.size != 4) return 0.0
+        var total = 0.0
+        for (i in 0..3) {
+            val angleValue = angle(q[(i + 3) % 4], q[i], q[(i + 1) % 4])
+            total += (1.0 - min(90.0, abs(angleValue - 90.0)) / 90.0)
+        }
+        return (total / 4.0).coerceIn(0.0, 1.0)
+    }
+
+    private fun edgeContactScore(q: Array<Point>, width: Int, height: Int): Double {
+        val toleranceX = width * 0.08
+        val toleranceY = height * 0.08
+        var contacts = 0
+        for (p in q) {
+            if (p.x <= toleranceX || p.x >= width - toleranceX) contacts++
+            if (p.y <= toleranceY || p.y >= height - toleranceY) contacts++
+        }
+        return if (contacts == 0) 0.55 else (0.55 + contacts * 0.075).coerceAtMost(1.0)
     }
 
     private fun edgesAdaptive(srcGray: Mat, out: Mat) {
