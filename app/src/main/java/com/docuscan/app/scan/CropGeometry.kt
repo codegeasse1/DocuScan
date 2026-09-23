@@ -10,8 +10,8 @@ import kotlin.math.hypot
  */
 object CropGeometry {
 
-    const val EDGE_TOUCH_RADIUS_PX = 24f
-    const val EDGE_END_DEADZONE = 0.15f
+    const val EDGE_TOUCH_RADIUS_PX = 72f
+    const val EDGE_END_DEADZONE = 0f
     const val IMG_OOB_TOL = 0.25f
 
     class Projection(val t: Float, val perpDist: Float)
@@ -34,19 +34,23 @@ object CropGeometry {
 
     /** Edge index 0=Top, 1=Right, 2=Bottom, 3=Left, or -1. */
     fun findEdgeHit(xs: FloatArray, ys: FloatArray, x: Float, y: Float): Int {
+        if (xs.size < 4 || ys.size < 4) return -1
+
         var best = -1
-        var bestDist = EDGE_TOUCH_RADIUS_PX
+        var bestDistance = Float.POSITIVE_INFINITY
+
         for (i in 0..3) {
             val j = (i + 1) % 4
             val p = projectOntoSegment(x, y, xs[i], ys[i], xs[j], ys[j])
-            if (p.perpDist <= EDGE_TOUCH_RADIUS_PX &&
-                p.t > EDGE_END_DEADZONE && p.t < 1f - EDGE_END_DEADZONE &&
-                p.perpDist < bestDist
-            ) {
-                bestDist = p.perpDist
+
+            // The whole edge is draggable. Corner hit-testing in CropOverlay
+            // has priority, so there is no ambiguity near the corners.
+            if (p.perpDist <= EDGE_TOUCH_RADIUS_PX && p.perpDist < bestDistance) {
+                bestDistance = p.perpDist
                 best = i
             }
         }
+
         return best
     }
 
