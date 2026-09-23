@@ -371,12 +371,20 @@ object Cleanup {
                                     val rectangularity = rectangularityScore(quad)
                                     val edgeSupport = quadEdgeSupport(quad, edgeMap)
                                     val centerScore = quadCenterScore(quad, rgba.width(), rgba.height())
+                                    val parallelism = quadParallelismScore(quad)
+                                    val frameContact = edgeContactScore(quad, rgba.width(), rgba.height())
 
+                                    // A real sheet normally has strong continuous edges,
+                                    // roughly parallel opposite sides, a large area, and
+                                    // a sensible relationship to the image frame. This
+                                    // keeps text boxes/table cells from winning over the page.
                                     val score =
-                                        areaNorm * 0.35 +
-                                        rectangularity * 0.25 +
+                                        areaNorm * 0.30 +
+                                        rectangularity * 0.20 +
                                         edgeSupport * 0.30 +
-                                        centerScore * 0.10
+                                        parallelism * 0.10 +
+                                        frameContact * 0.05 +
+                                        centerScore * 0.05
 
                                     if (score > bestScore) {
                                         bestScore = score
@@ -485,6 +493,27 @@ object Cleanup {
             total += (1.0 - min(90.0, abs(angleValue - 90.0)) / 90.0)
         }
         return (total / 4.0).coerceIn(0.0, 1.0)
+    }
+
+
+    private fun quadParallelismScore(q: Array<Point>): Double {
+        if (q.size != 4) return 0.0
+
+        fun lineAngle(a: Point, b: Point): Double {
+            var deg = Math.toDegrees(atan2(b.y - a.y, b.x - a.x))
+            deg = ((deg % 180.0) + 180.0) % 180.0
+            return deg
+        }
+
+        fun parallelPairScore(a: Point, b: Point, c: Point, d: Point): Double {
+            var delta = abs(lineAngle(a, b) - lineAngle(c, d))
+            if (delta > 90.0) delta = 180.0 - delta
+            return (1.0 - delta / 45.0).coerceIn(0.0, 1.0)
+        }
+
+        val topBottom = parallelPairScore(q[0], q[1], q[2], q[3])
+        val rightLeft = parallelPairScore(q[1], q[2], q[3], q[0])
+        return ((topBottom + rightLeft) * 0.5).coerceIn(0.0, 1.0)
     }
 
     private fun edgeContactScore(q: Array<Point>, width: Int, height: Int): Double {
