@@ -48,6 +48,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -113,6 +114,7 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
     val snapActive = remember { mutableStateListOf(false, false, false, false) }
     var snapHighlight by remember { mutableIntStateOf(-1) }
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
 
     fun corner(i: Int): Offset {
         val f = fit
@@ -229,7 +231,7 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
 
         // A generous touch zone makes a page corner easy to correct even when
         // auto-detection placed the crop handle somewhat away from it.
-        val cornerZone = maxOf(72.dp.toPx(), minOf(f.width, f.height) * 0.14f)
+        val cornerZone = maxOf(with(density) { 72.dp.toPx() }, minOf(f.width, f.height) * 0.14f)
         if (nearestCorner >= 0 &&
             (nearestCornerDistance <= cornerZone || lastDraggedCorner == nearestCorner)
         ) {
