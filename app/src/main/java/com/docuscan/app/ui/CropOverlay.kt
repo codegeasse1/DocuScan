@@ -9,6 +9,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitDragOrCancellation
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,7 +50,6 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.awaitPointerEvent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
@@ -317,53 +318,54 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
                             dragCorner = selectedCorner
 
                             if (selectedCorner < 0 && selectedEdge < 0) {
-                                awaitPointerEvent(pass = PointerEventPass.Main)
                                 return@awaitEachGesture
                             }
 
-                            var active = true
-                            while (active) {
-                                val event = awaitPointerEvent(pass = PointerEventPass.Main)
-                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            // Select on finger-down, then use Compose's stable drag API
+                            // for movement. This avoids the unavailable raw pointer-event
+                            // API on this project's Compose version.
+                            val firstDrag = awaitDragOrCancellation(down.id)
+                            if (firstDrag != null) {
+                                fun applyDragPosition(current: Offset) {
+                                    val ed = edgeDrag
 
-                                if (!change.pressed) {
-                                    active = false
-                                    break
-                                }
-
-                                val current = change.position
-                                val ed = edgeDrag
-
-                                if (ed != null && selectedEdge >= 0) {
-                                    val res = CropGeometry.applyEdgeTranslation(
-                                        ed.xs0, ed.ys0, ed.edgeIndex,
-                                        ed.m0x, ed.m0y, ed.nx, ed.ny,
-                                        current.x, current.y
-                                    )
-                                    if (res.applied) {
-                                        for (i in 0..3) setViewCorner(i, res.xs[i], res.ys[i])
-                                    }
-                                } else if (selectedCorner >= 0) {
-                                    val i = selectedCorner
-                                    val newX = current.x.coerceIn(fit.left, fit.right)
-                                    val newY = current.y.coerceIn(fit.top, fit.bottom)
-                                    val corners = (0..3).map { corner(it).x.toDouble() to corner(it).y.toDouble() }
-                                    val res = CropGeometry.snapEvaluate(
-                                        corners, i,
-                                        newX.toDouble(), newY.toDouble(),
-                                        snapActive[(i + 3) % 4], snapActive[i]
-                                    )
-                                    setViewCorner(i, res.x.toFloat(), res.y.toFloat())
-                                    snapActive[(i + 3) % 4] = res.prevEdgeSnapped
-                                    snapActive[i] = res.nextEdgeSnapped
-                                    snapHighlight = when {
-                                        res.prevEdgeSnapped -> (i + 3) % 4
-                                        res.nextEdgeSnapped -> i
-                                        else -> -1
+                                    if (ed != null && selectedEdge >= 0) {
+                                        val res = CropGeometry.applyEdgeTranslation(
+                                            ed.xs0, ed.ys0, ed.edgeIndex,
+                                            ed.m0x, ed.m0y, ed.nx, ed.ny,
+                                            current.x, current.y
+                                        )
+                                        if (res.applied) {
+                                            for (i in 0..3) setViewCorner(i, res.xs[i], res.ys[i])
+                                        }
+                                    } else if (selectedCorner >= 0) {
+                                        val i = selectedCorner
+                                        val newX = current.x.coerceIn(fit.left, fit.right)
+                                        val newY = current.y.coerceIn(fit.top, fit.bottom)
+                                        val corners = (0..3).map { corner(it).x.toDouble() to corner(it).y.toDouble() }
+                                        val res = CropGeometry.snapEvaluate(
+                                            corners, i,
+                                            newX.toDouble(), newY.toDouble(),
+                                            snapActive[(i + 3) % 4], snapActive[i]
+                                        )
+                                        setViewCorner(i, res.x.toFloat(), res.y.toFloat())
+                                        snapActive[(i + 3) % 4] = res.prevEdgeSnapped
+                                        snapActive[i] = res.nextEdgeSnapped
+                                        snapHighlight = when {
+                                            res.prevEdgeSnapped -> (i + 3) % 4
+                                            res.nextEdgeSnapped -> i
+                                            else -> -1
+                                        }
                                     }
                                 }
 
-                                change.consume()
+                                applyDragPosition(firstDrag.position)
+                                firstDrag.consume()
+
+                                drag(down.id) { change ->
+                                    applyDragPosition(change.position)
+                                    change.consume()
+                                }
                             }
 
                             dragCorner = -1
