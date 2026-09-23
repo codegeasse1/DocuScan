@@ -111,7 +111,7 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
     LaunchedEffect(vm.screen, vm.autoCropNextPage, page?.id) {
         if (vm.screen == com.docuscan.app.Screen.Editor && vm.autoCropNextPage && page != null) {
             cropMode = true
-            vm.autoCropNextPage = false
+            vm.consumeAutoCropNextPage()
         }
     }
 
