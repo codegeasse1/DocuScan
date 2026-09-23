@@ -7,7 +7,11 @@ import android.graphics.PointF
 import android.graphics.RectF
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.consume
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +50,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
@@ -277,51 +282,73 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
                 Modifier
                     .fillMaxSize()
                     .pointerInput(boxSize, rotBitmap) {
-                        detectDragGestures(
-                            onDragStart = { pos ->
-                                // Corner hit first (larger radius), then edge hit.
-                                var best = -1
-                                var bestD = 70f
-                                for (i in 0..3) {
-                                    val d = (corner(i) - pos).getDistance()
-                                    if (d < bestD) {
-                                        bestD = d
-                                        best = i
-                                    }
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Main)
+                            val pos = down.position
+
+                            // Select the target at finger-down, not after Compose's
+                            // drag detector has already crossed touch-slop.
+                            var selectedCorner = -1
+                            var bestCornerDistance = Float.POSITIVE_INFINITY
+                            val cornerHitRadius = 48.dp.toPx()
+
+                            for (i in 0..3) {
+                                val distance = (corner(i) - pos).getDistance()
+                                if (distance <= cornerHitRadius && distance < bestCornerDistance) {
+                                    bestCornerDistance = distance
+                                    selectedCorner = i
                                 }
-                                if (best >= 0) {
-                                    dragCorner = best
-                                    edgeDrag = null
-                                    return@detectDragGestures
-                                }
+                            }
+
+                            var selectedEdge = -1
+                            if (selectedCorner < 0) {
                                 val xs = FloatArray(4) { corner(it).x }
                                 val ys = FloatArray(4) { corner(it).y }
-                                val e = CropGeometry.findEdgeHit(xs, ys, pos.x, pos.y)
-                                if (e >= 0) {
-                                    val a = e
-                                    val b = (e + 1) % 4
+                                selectedEdge = CropGeometry.findEdgeHit(xs, ys, pos.x, pos.y)
+
+                                if (selectedEdge >= 0) {
+                                    val a = selectedEdge
+                                    val b = (selectedEdge + 1) % 4
                                     val m0x = (xs[a] + xs[b]) / 2f
                                     val m0y = (ys[a] + ys[b]) / 2f
-                                    val n = CropGeometry.outwardUnitNormal(xs, ys, e)
-                                    edgeDrag = EdgeDrag(e, xs, ys, m0x, m0y, n[0], n[1])
-                                    dragCorner = -1
+                                    val n = CropGeometry.outwardUnitNormal(xs, ys, selectedEdge)
+                                    edgeDrag = EdgeDrag(selectedEdge, xs, ys, m0x, m0y, n[0], n[1])
                                 }
-                            },
-                            onDrag = { change, _ ->
+                            }
+
+                            dragCorner = selectedCorner
+
+                            if (selectedCorner < 0 && selectedEdge < 0) {
+                                awaitPointerEvent(pass = PointerEventPass.Main)
+                                return@awaitEachGesture
+                            }
+
+                            var active = true
+                            while (active) {
+                                val event = awaitPointerEvent(pass = PointerEventPass.Main)
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+
+                                if (!change.pressed) {
+                                    active = false
+                                    break
+                                }
+
+                                val current = change.position
                                 val ed = edgeDrag
-                                if (ed != null) {
+
+                                if (ed != null && selectedEdge >= 0) {
                                     val res = CropGeometry.applyEdgeTranslation(
                                         ed.xs0, ed.ys0, ed.edgeIndex,
                                         ed.m0x, ed.m0y, ed.nx, ed.ny,
-                                        change.position.x, change.position.y
+                                        current.x, current.y
                                     )
                                     if (res.applied) {
                                         for (i in 0..3) setViewCorner(i, res.xs[i], res.ys[i])
                                     }
-                                } else if (dragCorner >= 0) {
-                                    val i = dragCorner
-                                    val newX = change.position.x.coerceIn(fit.left, fit.right)
-                                    val newY = change.position.y.coerceIn(fit.top, fit.bottom)
+                                } else if (selectedCorner >= 0) {
+                                    val i = selectedCorner
+                                    val newX = current.x.coerceIn(fit.left, fit.right)
+                                    val newY = current.y.coerceIn(fit.top, fit.bottom)
                                     val corners = (0..3).map { corner(it).x.toDouble() to corner(it).y.toDouble() }
                                     val res = CropGeometry.snapEvaluate(
                                         corners, i,
@@ -337,21 +364,15 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
                                         else -> -1
                                     }
                                 }
+
                                 change.consume()
-                            },
-                            onDragEnd = {
-                                dragCorner = -1
-                                edgeDrag = null
-                                for (i in 0..3) snapActive[i] = false
-                                snapHighlight = -1
-                            },
-                            onDragCancel = {
-                                dragCorner = -1
-                                edgeDrag = null
-                                for (i in 0..3) snapActive[i] = false
-                                snapHighlight = -1
                             }
-                        )
+
+                            dragCorner = -1
+                            edgeDrag = null
+                            for (i in 0..3) snapActive[i] = false
+                            snapHighlight = -1
+                        }
                     }
             ) {
                 val f = fit
