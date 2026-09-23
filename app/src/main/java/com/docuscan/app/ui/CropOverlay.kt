@@ -209,12 +209,12 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
         // If the auto box is badly displaced, nearest-corner is unreliable.
         // Use the tap's position relative to the current crop center to choose
         // the intended TL/TR/BR/BL corner.
-        val centerX = (0..3).map { corner(it).x }.average().toFloat()
-        val centerY = (0..3).map { corner(it).y }.average().toFloat()
+        val imageCenterX = (f.left + f.right) * 0.5f
+        val imageCenterY = (f.top + f.bottom) * 0.5f
         val target = when {
-            viewX < centerX && viewY < centerY -> 0
-            viewX >= centerX && viewY < centerY -> 1
-            viewX >= centerX && viewY >= centerY -> 2
+            viewX < imageCenterX && viewY < imageCenterY -> 0
+            viewX >= imageCenterX && viewY < imageCenterY -> 1
+            viewX >= imageCenterX && viewY >= imageCenterY -> 2
             else -> 3
         }
 
@@ -365,18 +365,24 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
                             if (selectedCorner < 0) {
                                 val firstDrag = awaitDragOrCancellation(down.id)
                                 if (firstDrag == null) {
-                                    // A tap on an edge or in the image is a guided
-                                    // correction. This is intentionally allowed even
-                                    // when the tap is inside the existing edge hit area.
                                     scope.launch { refineCornerAtViewPoint(pos.x, pos.y) }
                                 }
                                 return@awaitEachGesture
                             }
 
-                            // Select on finger-down, then use Compose's stable drag API
-                            // for movement. This avoids the unavailable raw pointer-event
-                            // API on this project's Compose version.
-                            val firstDrag = awaitDragOrCancellation(down.id)
+                            // A tap directly on a handle also means "find the real
+                            // corner here"; only a movement starts manual dragging.
+                            val cornerDrag = awaitDragOrCancellation(down.id)
+                            if (cornerDrag == null) {
+                                scope.launch { refineCornerAtViewPoint(pos.x, pos.y) }
+                                dragCorner = -1
+                                edgeDrag = null
+                                for (i in 0..3) snapActive[i] = false
+                                snapHighlight = -1
+                                return@awaitEachGesture
+                            }
+
+                            val firstDrag = cornerDrag
                             if (firstDrag != null) {
                                 fun applyDragPosition(current: Offset) {
                                     val ed = edgeDrag
