@@ -206,17 +206,16 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
 
         if (refined == null) return false
 
-        // The tapped point identifies which crop corner the user wants to fix:
-        // use the nearest current crop corner, rather than requiring the overlay
-        // handle itself to be under the finger.
-        var target = 0
-        var best = Float.POSITIVE_INFINITY
-        for (i in 0..3) {
-            val d = (corner(i) - Offset(viewX, viewY)).getDistance()
-            if (d < best) {
-                best = d
-                target = i
-            }
+        // If the auto box is badly displaced, nearest-corner is unreliable.
+        // Use the tap's position relative to the current crop center to choose
+        // the intended TL/TR/BR/BL corner.
+        val centerX = (0..3).map { corner(it).x }.average().toFloat()
+        val centerY = (0..3).map { corner(it).y }.average().toFloat()
+        val target = when {
+            viewX < centerX && viewY < centerY -> 0
+            viewX >= centerX && viewY < centerY -> 1
+            viewX >= centerX && viewY >= centerY -> 2
+            else -> 3
         }
 
         norm[target * 2] = (refined.x / rotBitmap.width).coerceIn(0f, 1f)
@@ -363,9 +362,12 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
                             //
                             // If the tap is on an existing handle/edge, dragging still has
                             // priority and behaves exactly as before.
-                            if (selectedCorner < 0 && selectedEdge < 0) {
+                            if (selectedCorner < 0) {
                                 val firstDrag = awaitDragOrCancellation(down.id)
                                 if (firstDrag == null) {
+                                    // A tap on an edge or in the image is a guided
+                                    // correction. This is intentionally allowed even
+                                    // when the tap is inside the existing edge hit area.
                                     scope.launch { refineCornerAtViewPoint(pos.x, pos.y) }
                                 }
                                 return@awaitEachGesture
