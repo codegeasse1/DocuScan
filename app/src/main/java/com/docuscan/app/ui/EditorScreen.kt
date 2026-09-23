@@ -90,6 +90,9 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
     var discardDialog by remember { mutableStateOf(false) }
     // When on, filter / brightness / contrast changes are applied to every page (batch mode).
     var applyToAll by remember { mutableStateOf(false) }
+    var rememberCameraForSession by remember(vm.cameraPreferredForSession) {
+        mutableStateOf(vm.cameraPreferredForSession)
+    }
 
     val galleryLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia()
@@ -102,6 +105,13 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
                 if (bitmaps.isNotEmpty()) vm.addBitmaps(bitmaps)
                 else snackbar.showSnackbar("Couldn't load those images")
             }
+        }
+    }
+
+    LaunchedEffect(vm.screen, vm.autoCropNextPage, page?.id) {
+        if (vm.screen == com.docuscan.app.Screen.Editor && vm.autoCropNextPage && page != null) {
+            cropMode = true
+            vm.autoCropNextPage = false
         }
     }
 
@@ -174,11 +184,32 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
             text = {
                 Column {
                     Text("Scan another page with the camera, or import it from your gallery.")
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Use camera automatically for this session",
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Switch(
+                            checked = rememberCameraForSession,
+                            onCheckedChange = { rememberCameraForSession = it }
+                        )
+                    }
+                    Text(
+                        "Until you close DocuScan.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             },
             confirmButton = {
                 Row {
-                    TextButton(onClick = { addDialog = false; vm.openCamera(fromEditor = true) }) {
+                    TextButton(onClick = {
+                        addDialog = false
+                        vm.setCameraPreferredForSession(rememberCameraForSession)
+                        vm.openCamera(fromEditor = true, autoCrop = true)
+                    }) {
                         Icon(AppIcons.Camera, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
                         Text("Camera")
@@ -422,7 +453,13 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item {
-                AddPageTile { addDialog = true }
+                AddPageTile {
+                    if (vm.cameraPreferredForSession) {
+                        vm.openCamera(fromEditor = true, autoCrop = true)
+                    } else {
+                        addDialog = true
+                    }
+                }
             }
             itemsIndexed(vm.pages, key = { _, p -> p.id }) { index, p ->
                 val selected = index == vm.selectedPage
