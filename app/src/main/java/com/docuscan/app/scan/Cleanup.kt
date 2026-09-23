@@ -344,7 +344,7 @@ object Cleanup {
                 val contours = mutableListOf<MatOfPoint>()
                 val hierarchy = Mat()
                 try {
-                    Imgproc.findContours(edgeMap, contours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE)
+                    Imgproc.findContours(edgeMap, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
                     for (contour in contours) {
                         val area = Imgproc.contourArea(contour)
                         if (area < imgArea * 0.04) continue
@@ -374,17 +374,18 @@ object Cleanup {
                                     val parallelism = quadParallelismScore(quad)
                                     val frameContact = edgeContactScore(quad, rgba.width(), rgba.height())
 
-                                    // A real sheet normally has strong continuous edges,
-                                    // roughly parallel opposite sides, a large area, and
-                                    // a sensible relationship to the image frame. This
-                                    // keeps text boxes/table cells from winning over the page.
+                                    // Reject weak/partial contours. A page boundary should
+                                    // have usable support on all four sides, not just a long
+                                    // top/left edge.
+                                    if (edgeSupport < 0.30 || parallelism < 0.45) continue
+
                                     val score =
-                                        areaNorm * 0.30 +
-                                        rectangularity * 0.20 +
+                                        areaNorm * 0.34 +
+                                        rectangularity * 0.18 +
                                         edgeSupport * 0.30 +
                                         parallelism * 0.10 +
                                         frameContact * 0.05 +
-                                        centerScore * 0.05
+                                        centerScore * 0.03
 
                                     if (score > bestScore) {
                                         bestScore = score
@@ -680,99 +681,131 @@ object Cleanup {
      * Harris/Shi-Tomasi corners, sub-pixel refine them, and choose the candidate
      * that balances proximity to the tap with local corner strength.
      */
-    fun refineCornerNear(src: Bitmap, tapX: Float, tapY: Float, radiusPx: Float = 180f): PointF? {
+    /**
+     * Finds the page corner nearest a user-guided point. Unlike plain feature
+     * detection, this combines local Canny/Hough line intersections with
+     * sub-pixel corners, so a weak paper corner can still be recovered.
+     */
+    fun refineCornerNear(src: Bitmap, tapX: Float, tapY: Float, radiusPx: Float = 260f): PointF? {
         if (!ensureLoaded()) return null
         if (tapX !in 0f..src.width.toFloat() || tapY !in 0f..src.height.toFloat()) return null
 
         val rgba = Mat()
         val gray = Mat()
+        val roi = Mat()
+        val edges = Mat()
+        val lines = Mat()
         try {
             Utils.bitmapToMat(src, rgba)
             Imgproc.cvtColor(rgba, gray, Imgproc.COLOR_RGBA2GRAY)
 
-            val radius = radiusPx.coerceIn(48f, 320f)
+            val radius = radiusPx.coerceIn(80f, 420f)
             val left = max(0, (tapX - radius).toInt())
             val top = max(0, (tapY - radius).toInt())
             val right = min(gray.cols(), (tapX + radius).toInt() + 1)
             val bottom = min(gray.rows(), (tapY + radius).toInt() + 1)
-            if (right - left < 24 || bottom - top < 24) return null
+            if (right - left < 48 || bottom - top < 48) return null
 
-            val roi = gray.submat(top, bottom, left, right)
-            val smooth = Mat()
-            val corners = MatOfPoint()
-            val refined = MatOfPoint2f()
-            try {
-                Imgproc.GaussianBlur(roi, smooth, Size(3.0, 3.0), 0.0)
-                Imgproc.goodFeaturesToTrack(
-                    smooth,
-                    corners,
-                    32,
-                    0.005,
-                    8.0,
-                    Mat(),
-                    7,
-                    true,
-                    0.04
-                )
-                if (corners.empty()) return null
+            gray.submat(top, bottom, left, right).copyTo(roi)
+            Imgproc.GaussianBlur(roi, roi, Size(3.0, 3.0), 0.0)
+            Imgproc.Canny(roi, edges, 35.0, 120.0)
 
-                val pts = corners.toArray()
-                val local2f = MatOfPoint2f(*pts.map { Point(it.x, it.y) }.toTypedArray())
-                try {
-                    Imgproc.cornerSubPix(
-                        smooth,
-                        local2f,
-                        Size(5.0, 5.0),
-                        Size(-1.0, -1.0),
-                        org.opencv.core.TermCriteria(
-                            org.opencv.core.TermCriteria.EPS + org.opencv.core.TermCriteria.MAX_ITER,
-                            30,
-                            0.01
-                        )
-                    )
-                    val refinedPts = local2f.toArray()
-                    if (refinedPts.isEmpty()) return null
+            // Close tiny gaps in the paper boundary before Hough detection.
+            val k = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0))
+            Imgproc.morphologyEx(edges, edges, Imgproc.MORPH_CLOSE, k)
+            k.release()
 
-                    var best: Point? = null
-                    var bestScore = Double.POSITIVE_INFINITY
-                    val tapLocalX = tapX - left
-                    val tapLocalY = tapY - top
+            val minLine = max(18, min(roi.cols(), roi.rows()) / 7)
+            Imgproc.HoughLinesP(
+                edges, lines, 1.0, Math.PI / 180.0,
+                max(18, minLine / 2), minLine.toDouble(), 12.0
+            )
 
-                    for (p in refinedPts) {
-                        val dx = p.x - tapLocalX
-                        val dy = p.y - tapLocalY
-                        val dist = Math.hypot(dx, dy)
-                        if (dist > radius * 0.95) continue
-
-                        // Prefer points close to the user's tap. A small gradient
-                        // check rejects many text/texture corners.
-                        val ix = p.x.toInt().coerceIn(2, smooth.cols() - 3)
-                        val iy = p.y.toInt().coerceIn(2, smooth.rows() - 3)
-                        val gx = abs(smooth.get(iy, ix + 2)[0] - smooth.get(iy, ix - 2)[0])
-                        val gy = abs(smooth.get(iy + 2, ix)[0] - smooth.get(iy - 2, ix)[0])
-                        val strength = gx + gy
-                        val score = dist - min(80.0, strength * 0.12)
-                        if (score < bestScore) {
-                            bestScore = score
-                            best = Point(p.x + left, p.y + top)
-                        }
-                    }
-
-                    return best?.let { PointF(it.x.toFloat(), it.y.toFloat()) }
-                } finally {
-                    local2f.release()
+            data class L(val x1: Double, val y1: Double, val x2: Double, val y2: Double, val angle: Double, val len: Double)
+            val hs = mutableListOf<L>()
+            val vs = mutableListOf<L>()
+            for (i in 0 until lines.rows()) {
+                val v = lines.get(i, 0)
+                val dx = v[2] - v[0]
+                val dy = v[3] - v[1]
+                val len = Math.hypot(dx, dy)
+                if (len < minLine) continue
+                var a = Math.toDegrees(atan2(dy, dx))
+                a = ((a % 180.0) + 180.0) % 180.0
+                val l = L(v[0], v[1], v[2], v[3], a, len)
+                when {
+                    a < 28.0 || a > 152.0 -> hs.add(l)
+                    a > 62.0 && a < 118.0 -> vs.add(l)
                 }
-            } finally {
-                roi.release()
-                smooth.release()
-                corners.release()
-                refined.release()
             }
+
+            fun intersect(a: L, b: L): Point? {
+                val den = (a.x1-a.x2)*(b.y1-b.y2) - (a.y1-a.y2)*(b.x1-b.x2)
+                if (abs(den) < 1e-8) return null
+                val t = ((a.x1-b.x1)*(b.y1-b.y2) - (a.y1-b.y1)*(b.x1-b.x2)) / den
+                return Point(a.x1+t*(a.x2-a.x1), a.y1+t*(a.y2-a.y1))
+            }
+
+            var best: Point? = null
+            var bestScore = Double.POSITIVE_INFINITY
+            val tapLocalX = tapX - left
+            val tapLocalY = tapY - top
+
+            // Prefer intersections close to the tap, but only when both lines
+            // extend toward the intersection. This avoids unrelated text boxes.
+            for (h in hs) for (v in vs) {
+                val p = intersect(h, v) ?: continue
+                if (p.x < -24 || p.x > roi.cols()+24 || p.y < -24 || p.y > roi.rows()+24) continue
+                val dist = Math.hypot(p.x - tapLocalX, p.y - tapLocalY)
+                if (dist > radius * 0.72) continue
+
+                fun extensionPenalty(l: L): Double {
+                    fun d(x: Double, y: Double): Double {
+                        val cross = abs((x-l.x1)*(l.y2-l.y1) - (y-l.y1)*(l.x2-l.x1))
+                        return cross / (l.len + 1e-6)
+                    }
+                    return min(80.0, d(p.x,p.y))
+                }
+                val score = dist + extensionPenalty(h) + extensionPenalty(v)
+                    - min(50.0, (h.len + v.len) * 0.08)
+                if (score < bestScore) {
+                    bestScore = score
+                    best = Point(p.x + left, p.y + top)
+                }
+            }
+
+            // Fallback: Shi-Tomasi + sub-pixel refinement.
+            if (best == null) {
+                val corners = MatOfPoint()
+                try {
+                    Imgproc.goodFeaturesToTrack(roi, corners, 64, 0.003, 6.0, Mat(), 7, true, 0.04)
+                    if (!corners.empty()) {
+                        val p2 = MatOfPoint2f(*corners.toArray().map { Point(it.x,it.y) }.toTypedArray())
+                        try {
+                            Imgproc.cornerSubPix(
+                                roi, p2, Size(5.0,5.0), Size(-1.0,-1.0),
+                                org.opencv.core.TermCriteria(
+                                    org.opencv.core.TermCriteria.EPS + org.opencv.core.TermCriteria.MAX_ITER,
+                                    40, 0.01
+                                )
+                            )
+                            for (p in p2.toArray()) {
+                                val d = Math.hypot(p.x-tapLocalX, p.y-tapLocalY)
+                                if (d < bestScore && d <= radius * 0.72) {
+                                    bestScore = d
+                                    best = Point(p.x+left, p.y+top)
+                                }
+                            }
+                        } finally { p2.release() }
+                    }
+                } finally { corners.release() }
+            }
+
+            return best?.let { PointF(it.x.toFloat(), it.y.toFloat()) }
         } catch (_: Throwable) {
             return null
         } finally {
-            rgba.release()
-            gray.release()
+            rgba.release(); gray.release(); roi.release(); edges.release(); lines.release()
         }
     }
 
