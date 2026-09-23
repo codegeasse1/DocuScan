@@ -102,6 +102,8 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
     // Normalized corners (0..1) inside the fit rect: TL, TR, BR, BL
     val norm = remember { mutableStateListOf(0.02f, 0.02f, 0.98f, 0.02f, 0.98f, 0.98f, 0.02f, 0.98f) }
     var dragCorner by remember { mutableIntStateOf(-1) }
+    // Explicit redraw token so corner placement is reflected immediately in the overlay.
+    var cropRevision by remember { mutableIntStateOf(0) }
     var edgeDrag by remember { mutableStateOf<EdgeDrag?>(null) }
     var aspectRatio by remember { mutableStateOf(CropAspectRatio.AUTO) }
     var customRatioText by remember { mutableStateOf("1.4142") }
@@ -122,6 +124,7 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
         val f = fit
         norm[i * 2] = ((x - f.left) / f.width).coerceIn(-0.05f, 1.05f)
         norm[i * 2 + 1] = ((y - f.top) / f.height).coerceIn(-0.05f, 1.05f)
+        cropRevision++
     }
 
     fun reset() {
@@ -457,6 +460,10 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
                         }
                     }
             ) {
+                // Read the revision in the draw scope so every tap/drag state mutation
+                // forces the visible overlay to redraw immediately.
+                val currentCropRevision = cropRevision
+                if (currentCropRevision < 0) return@Canvas
                 val f = fit
                 val rect = RectF(f.left, f.top, f.right, f.bottom)
                 val canvas = drawContext.canvas.nativeCanvas
