@@ -355,27 +355,92 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
 
                             dragCorner = selectedCorner
 
-                            // A simple tap anywhere on the image is also meaningful:
-                            // it becomes a "guided corner correction". This lets the user
-                            // tap the real paper corner even when auto-detection is off by
-                            // several dozen pixels.
-                            //
-                            // If the tap is on an existing handle/edge, dragging still has
-                            // priority and behaves exactly as before.
+                            // A tap anywhere on the image is a guided correction.
+                            // If it lands on an existing edge, a real drag has priority.
+                            // The old implementation returned immediately after waiting for
+                            // the drag, so edgeDrag was NEVER applied; this is why the + edge
+                            // handles in the screenshots appeared completely unresponsive.
+                            if (selectedCorner < 0 && selectedEdge >= 0) {
+                                val edgeFirstDrag = awaitDragOrCancellation(down.id)
+                                if (edgeFirstDrag == null) {
+                                    scope.launch { refineCornerAtViewPoint(pos.x, pos.y) }
+                                } else {
+                                    fun applyEdge(current: Offset) {
+                                        val ed = edgeDrag ?: return
+                                        val res = CropGeometry.applyEdgeTranslation(
+                                            ed.xs0, ed.ys0, ed.edgeIndex,
+                                            ed.m0x, ed.m0y, ed.nx, ed.ny,
+                                            current.x, current.y
+                                        )
+                                        if (res.applied) {
+                                            for (i in 0..3) setViewCorner(i, res.xs[i], res.ys[i])
+                                        }
+                                    }
+                                    applyEdge(edgeFirstDrag.position)
+                                    edgeFirstDrag.consume()
+                                    drag(down.id) { change ->
+                                        applyEdge(change.position)
+                                        change.consume()
+                                    }
+                                }
+                                dragCorner = -1
+                                edgeDrag = null
+                                for (i in 0..3) snapActive[i] = false
+                                snapHighlight = -1
+                                return@awaitEachGesture
+                            }
+
                             if (selectedCorner < 0) {
                                 val firstDrag = awaitDragOrCancellation(down.id)
                                 if (firstDrag == null) {
                                     scope.launch { refineCornerAtViewPoint(pos.x, pos.y) }
                                 }
+                                dragCorner = -1
+                                edgeDrag = null
                                 return@awaitEachGesture
                             }
 
-                            // A tap directly on a handle also means "find the real
-                            // corner here"; only a movement starts manual dragging.
+                            // A tap directly on a corner handle means "find the real
+                            // corner here"; only movement starts manual corner dragging.
                             val cornerDrag = awaitDragOrCancellation(down.id)
                             if (cornerDrag == null) {
                                 scope.launch { refineCornerAtViewPoint(pos.x, pos.y) }
                                 dragCorner = -1
+                                edgeDrag = null
+                                for (i in 0..3) snapActive[i] = false
+                                snapHighlight = -1
+                                return@awaitEachGesture
+                            }
+
+                            fun applyCorner(current: Offset) {
+                                val i = selectedCorner
+                                val newX = current.x.coerceIn(fit.left, fit.right)
+                                val newY = current.y.coerceIn(fit.top, fit.bottom)
+                                val corners = (0..3).map { corner(it).x.toDouble() to corner(it).y.toDouble() }
+                                val res = CropGeometry.snapEvaluate(
+                                    corners, i,
+                                    newX.toDouble(), newY.toDouble(),
+                                    snapActive[(i + 3) % 4], snapActive[i]
+                                )
+                                setViewCorner(i, res.x.toFloat(), res.y.toFloat())
+                                snapActive[(i + 3) % 4] = res.prevEdgeSnapped
+                                snapActive[i] = res.nextEdgeSnapped
+                                snapHighlight = when {
+                                    res.prevEdgeSnapped -> (i + 3) % 4
+                                    res.nextEdgeSnapped -> i
+                                    else -> -1
+                                }
+                            }
+
+                            applyCorner(cornerDrag.position)
+                            cornerDrag.consume()
+
+                            drag(down.id) { change ->
+                                applyCorner(change.position)
+                                change.consume()
+                            }
+
+                            dragCorner = -1
                                 edgeDrag = null
                                 for (i in 0..3) snapActive[i] = false
                                 snapHighlight = -1
