@@ -1,5 +1,6 @@
 package com.docuscan.app.ui
 
+import androidx.activity.compose.BackHandler
 import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -163,6 +164,12 @@ fun EditorScreen(vm: DocViewModel, snackbar: SnackbarHostState) {
             val f = withContext(Dispatchers.IO) { Exporter.makePdf(context, vm) }
             if (f != null) ShareUtil.shareFile(context, f, "application/pdf")
         }
+    }
+
+    // Back while the crop editor is open should close only the crop editor.
+    // Do not let App's Editor-level BackHandler send the user all the way Home.
+    BackHandler(enabled = cropMode) {
+        cropMode = false
     }
 
     if (cropMode) {
