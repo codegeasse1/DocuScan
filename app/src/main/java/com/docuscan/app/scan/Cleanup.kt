@@ -336,23 +336,36 @@ object Cleanup {
             Imgproc.Canny(thresholdInv, binaryEdgesInv, 30.0, 120.0)
 
             val maps = listOf(edges, edgesAlt, closed, binaryEdges, binaryEdgesInv)
-            val imgArea = rgba.width() * rgba.height().toDouble()
-            var bestScore = -1.0
-            var bestQuad: Array<Point>? = null
 
-            for (edgeMap in maps) {
+            data class QuadCandidate(
+                val quad: Array<Point>,
+                val baseScore: Double,
+                val mapIndex: Int
+            )
+
+            val imgArea = rgba.width() * rgba.height().toDouble()
+            val candidates = mutableListOf<QuadCandidate>()
+
+            for ((mapIndex, edgeMap) in maps.withIndex()) {
                 val contours = mutableListOf<MatOfPoint>()
                 val hierarchy = Mat()
                 try {
-                    Imgproc.findContours(edgeMap, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
+                    Imgproc.findContours(
+                        edgeMap,
+                        contours,
+                        hierarchy,
+                        Imgproc.RETR_EXTERNAL,
+                        Imgproc.CHAIN_APPROX_SIMPLE
+                    )
+
                     for (contour in contours) {
                         val area = Imgproc.contourArea(contour)
-                        if (area < imgArea * 0.04) continue
+                        if (area < imgArea * 0.025) continue
 
                         val curve = MatOfPoint2f(*contour.toArray())
                         try {
                             val perimeter = Imgproc.arcLength(curve, true)
-                            for (epsilon in doubleArrayOf(0.010, 0.015, 0.022, 0.030)) {
+                            for (epsilon in doubleArrayOf(0.008, 0.012, 0.018, 0.025, 0.032)) {
                                 val approx = MatOfPoint2f()
                                 try {
                                     Imgproc.approxPolyDP(curve, approx, perimeter * epsilon, true)
@@ -370,28 +383,25 @@ object Cleanup {
                                     val areaNorm = (quadArea(quad) / imgArea).coerceIn(0.0, 1.0)
                                     val rectangularity = rectangularityScore(quad)
                                     val edgeSupport = quadEdgeSupport(quad, edgeMap)
-                                    val centerScore = quadCenterScore(quad, rgba.width(), rgba.height())
                                     val parallelism = quadParallelismScore(quad)
+                                    val perspectiveConsistency = perspectiveConsistencyScore(quad)
                                     val frameContact = edgeContactScore(quad, rgba.width(), rgba.height())
 
-                                    // Reject weak/partial contours. A page boundary should
-                                    // have usable support on all four sides, not just a long
-                                    // top/left edge.
-                                    if (edgeSupport < 0.30 || parallelism < 0.45) continue
+                                    if (edgeSupport < 0.24 || parallelism < 0.35) continue
 
-                                    // Prefer a complete, large page over a partial rectangle.
-                                    val score =
-                                        areaNorm * 0.48 +
-                                        rectangularity * 0.16 +
-                                        edgeSupport * 0.22 +
-                                        parallelism * 0.09 +
+                                    // Do not let "largest rectangle" dominate. A page should
+                                    // have four-sided evidence, plausible perspective, and
+                                    // repeat across more than one preprocessing map.
+                                    val baseScore =
+                                        areaNorm * 0.32 +
+                                        rectangularity * 0.18 +
+                                        edgeSupport * 0.25 +
+                                        parallelism * 0.10 +
+                                        perspectiveConsistency * 0.10 +
                                         frameContact * 0.03 +
-                                        centerScore * 0.02
+                                        quadCenterScore(quad, rgba.width(), rgba.height()) * 0.02
 
-                                    if (score > bestScore) {
-                                        bestScore = score
-                                        bestQuad = quad
-                                    }
+                                    candidates += QuadCandidate(quad, baseScore, mapIndex)
                                 } finally {
                                     approx.release()
                                 }
@@ -406,11 +416,39 @@ object Cleanup {
                 }
             }
 
-            if (bestQuad != null && bestScore >= 0.34) {
+            var bestScore = -1.0
+            var bestQuad: Array<Point>? = null
+
+            for (candidate in candidates) {
+                // Consensus is deliberately counted by preprocessing map, not by
+                // duplicate epsilon/contour candidates. This makes a real page
+                // boundary that survives different edge pipelines more trustworthy
+                // than a rectangle that appears in only one noisy threshold.
+                val agreeingMaps = mutableSetOf<Int>()
+                for (other in candidates) {
+                    if (quadDistance(candidate.quad, other.quad, rgba.width(), rgba.height()) <= 0.075) {
+                        agreeingMaps += other.mapIndex
+                    }
+                }
+                val mapConsensus = (agreeingMaps.size.toDouble() / maps.size).coerceIn(0.0, 1.0)
+                val score = candidate.baseScore + mapConsensus * 0.16
+
+                if (score > bestScore) {
+                    bestScore = score
+                    bestQuad = candidate.quad
+                }
+            }
+
+            // A candidate seen by only one map can still be valid, but require
+            // substantially stronger geometric/edge evidence before accepting it.
+            if (bestQuad != null && bestScore >= 0.42) {
                 return bestQuad!!.map { PointF(it.x.toFloat(), it.y.toFloat()) }
             }
 
-            for (map in listOf(edgesAlt, closed, edges)) {
+            // Lines are a second, independent detector. Unlike the old fallback,
+            // it does not simply take the first/last horizontal and vertical line;
+            // it searches for two opposite line pairs and scores their intersections.
+            for (map in listOf(edgesAlt, closed, edges, binaryEdges, binaryEdgesInv)) {
                 val q = detectQuadFromHoughLines(map, rgba.width(), rgba.height())
                 if (q != null) return q.map { PointF(it.x.toFloat(), it.y.toFloat()) }
             }
@@ -424,7 +462,42 @@ object Cleanup {
             threshold.release()
             thresholdInv.release()
             closed.release()
+            // binary edge maps are created only for this detection pass.
+            // Release them after contour/Hough evaluation.
+            // (They are intentionally not part of the class state.)
         }
+    }
+
+    private fun perspectiveConsistencyScore(q: Array<Point>): Double {
+        if (q.size != 4) return 0.0
+        val top = distance(q[0], q[1])
+        val bottom = distance(q[3], q[2])
+        val left = distance(q[0], q[3])
+        val right = distance(q[1], q[2])
+        if (minOf(top, bottom, left, right) < 1.0) return 0.0
+
+        fun ratioScore(a: Double, b: Double): Double {
+            val ratio = max(a, b) / min(a, b)
+            return (1.0 - ((ratio - 1.0) / 2.5)).coerceIn(0.0, 1.0)
+        }
+
+        return ((ratioScore(top, bottom) + ratioScore(left, right)) * 0.5)
+            .coerceIn(0.0, 1.0)
+    }
+
+    private fun quadDistance(
+        a: Array<Point>,
+        b: Array<Point>,
+        width: Int,
+        height: Int
+    ): Double {
+        if (a.size != 4 || b.size != 4) return Double.POSITIVE_INFINITY
+        val diagonal = Math.hypot(width.toDouble(), height.toDouble()).coerceAtLeast(1.0)
+        var total = 0.0
+        for (i in 0..3) {
+            total += distance(a[i], b[i]) / diagonal
+        }
+        return total / 4.0
     }
 
     private fun quadEdgeSupport(q: Array<Point>, edges: Mat): Double {
@@ -545,50 +618,139 @@ object Cleanup {
     private fun detectQuadFromHoughLines(edges: Mat, imgW: Int, imgH: Int): Array<Point>? {
         val lines = Mat()
         try {
-            val minLineLength = max(30, min(imgW, imgH) / 10)
-            val threshold = max(50, minLineLength / 2)
-            Imgproc.HoughLinesP(edges, lines, 1.0, Math.PI / 180.0, threshold, minLineLength.toDouble(), 10.0)
+            val minDim = min(imgW, imgH).toDouble()
+            val minLineLength = max(35, (minDim * 0.14).toInt())
+            val threshold = max(28, (minDim * 0.055).toInt())
+            Imgproc.HoughLinesP(
+                edges,
+                lines,
+                1.0,
+                Math.PI / 180.0,
+                threshold,
+                minLineLength.toDouble(),
+                max(12.0, minDim * 0.018)
+            )
             if (lines.rows() < 4) return null
 
-            val horizontal = mutableListOf<DoubleArray>()
-            val vertical = mutableListOf<DoubleArray>()
+            data class HLine(
+                val raw: DoubleArray,
+                val angle: Double,
+                val length: Double,
+                val mx: Double,
+                val my: Double
+            )
+
+            val all = mutableListOf<HLine>()
             for (i in 0 until lines.rows()) {
-                val line = lines.get(i, 0)
-                val x1 = line[0]; val y1 = line[1]; val x2 = line[2]; val y2 = line[3]
-                var angle = Math.toDegrees(atan2(y2 - y1, x2 - x1))
-                angle = ((angle % 180) + 180) % 180
-                when {
-                    angle < 30 || angle > 150 -> horizontal.add(line)
-                    angle > 60 && angle < 120 -> vertical.add(line)
+                val v = lines.get(i, 0) ?: continue
+                val dx = v[2] - v[0]
+                val dy = v[3] - v[1]
+                val length = Math.hypot(dx, dy)
+                if (length < minLineLength) continue
+                var angle = Math.toDegrees(atan2(dy, dx))
+                angle = ((angle % 180.0) + 180.0) % 180.0
+                all += HLine(
+                    v,
+                    angle,
+                    length,
+                    (v[0] + v[2]) * 0.5,
+                    (v[1] + v[3]) * 0.5
+                )
+            }
+
+            if (all.size < 4) return null
+
+            // Keep the strongest segments so the fallback remains fast and does
+            // not get dominated by text strokes and tiny background edges.
+            val strongest = all.sortedByDescending { it.length }.take(28)
+
+            fun angleDelta(a: Double, b: Double): Double {
+                var d = abs(a - b)
+                if (d > 90.0) d = 180.0 - d
+                return d
+            }
+
+            fun separation(a: HLine, b: HLine): Double {
+                val theta = Math.toRadians(a.angle)
+                val nx = -Math.sin(theta)
+                val ny = Math.cos(theta)
+                return abs((b.mx - a.mx) * nx + (b.my - a.my) * ny)
+            }
+
+            fun linePairScore(a: HLine, b: HLine): Double {
+                val parallel = (1.0 - angleDelta(a.angle, b.angle) / 18.0).coerceIn(0.0, 1.0)
+                val sep = separation(a, b)
+                val sepScore = (sep / (minDim * 0.75)).coerceIn(0.0, 1.0)
+                return parallel * 0.55 + sepScore * 0.45
+            }
+
+            var best: Array<Point>? = null
+            var bestScore = -1.0
+
+            for (i in strongest.indices) {
+                for (j in i + 1 until strongest.size) {
+                    val a = strongest[i]
+                    val b = strongest[j]
+                    val parallelA = angleDelta(a.angle, b.angle)
+                    if (parallelA > 14.0) continue
+                    if (separation(a, b) < minDim * 0.12) continue
+
+                    for (k in strongest.indices) {
+                        if (k == i || k == j) continue
+                        for (l in k + 1 until strongest.size) {
+                            if (l == i || l == j) continue
+                            val c = strongest[k]
+                            val d = strongest[l]
+                            if (angleDelta(c.angle, d.angle) > 14.0) continue
+
+                            val cross1 = angleDelta(a.angle, c.angle)
+                            val cross2 = angleDelta(a.angle, d.angle)
+                            if (cross1 < 62.0 || cross1 > 118.0) continue
+                            if (cross2 < 62.0 || cross2 > 118.0) continue
+                            if (separation(c, d) < minDim * 0.12) continue
+
+                            val tl = lineIntersection(a.raw, c.raw) ?: continue
+                            val tr = lineIntersection(a.raw, d.raw) ?: continue
+                            val br = lineIntersection(b.raw, d.raw) ?: continue
+                            val bl = lineIntersection(b.raw, c.raw) ?: continue
+
+                            val quad = sortPointsRobust(
+                                arrayOf(
+                                    clampPoint(tl, imgW, imgH),
+                                    clampPoint(tr, imgW, imgH),
+                                    clampPoint(br, imgW, imgH),
+                                    clampPoint(bl, imgW, imgH)
+                                )
+                            )
+
+                            if (!quadIsUsable(quad, imgW, imgH)) continue
+                            val areaNorm = quadArea(quad) / (imgW * imgH.toDouble())
+                            if (areaNorm < 0.06) continue
+
+                            val rect = rectangularityScore(quad)
+                            val parallel = quadParallelismScore(quad)
+                            val perspective = perspectiveConsistencyScore(quad)
+                            val lineStrength =
+                                (a.length + b.length + c.length + d.length) /
+                                    (4.0 * Math.hypot(imgW.toDouble(), imgH.toDouble()))
+
+                            val score =
+                                areaNorm.coerceIn(0.0, 1.0) * 0.28 +
+                                rect * 0.20 +
+                                parallel * 0.18 +
+                                perspective * 0.14 +
+                                lineStrength.coerceIn(0.0, 1.0) * 0.20
+
+                            if (score > bestScore) {
+                                bestScore = score
+                                best = quad
+                            }
+                        }
+                    }
                 }
             }
-            if (horizontal.size < 2 || vertical.size < 2) return null
 
-            horizontal.sortBy { (it[1] + it[3]) / 2 }
-            vertical.sortBy { (it[0] + it[2]) / 2 }
-            val top = horizontal.first()
-            val bottom = horizontal.last()
-            val left = vertical.first()
-            val right = vertical.last()
-
-            val tl = lineIntersection(top, left) ?: return null
-            val tr = lineIntersection(top, right) ?: return null
-            val br = lineIntersection(bottom, right) ?: return null
-            val bl = lineIntersection(bottom, left) ?: return null
-
-            val quad = sortPointsRobust(
-                arrayOf(
-                    clampPoint(tl, imgW, imgH),
-                    clampPoint(tr, imgW, imgH),
-                    clampPoint(br, imgW, imgH),
-                    clampPoint(bl, imgW, imgH)
-                )
-            )
-            val area = quadArea(quad)
-            val imgArea = imgW * imgH.toDouble()
-            if (area < imgArea * 0.05) return null
-            if (hasAcuteOrReflexAngles(quad)) return null
-            return quad
+            return if (bestScore >= 0.48) best else null
         } finally {
             lines.release()
         }
