@@ -328,7 +328,6 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
                             var selectedCorner = -1
                             var bestCornerDistance = Float.POSITIVE_INFINITY
                             val cornerHitRadius = 48.dp.toPx()
-
                             for (i in 0..3) {
                                 val distance = (corner(i) - pos).getDistance()
                                 if (distance <= cornerHitRadius && distance < bestCornerDistance) {
@@ -342,7 +341,6 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
                                 val xs = FloatArray(4) { corner(it).x }
                                 val ys = FloatArray(4) { corner(it).y }
                                 selectedEdge = CropGeometry.findEdgeHit(xs, ys, pos.x, pos.y)
-
                                 if (selectedEdge >= 0) {
                                     val aEdge = selectedEdge
                                     val bEdge = (selectedEdge + 1) % 4
@@ -355,14 +353,72 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
                                 }
                             }
 
-                            dragCorner = selectedCorner
+                            // A tap is an explicit corner placement. We do not call
+                            // OpenCV here because the requested behavior is that the
+                            // crop corner MUST go to the point the user tapped.
+                            fun placeCornerAtTap() {
+                                val f = fit
+                                if (f.width <= 1f || f.height <= 1f) return
+                                val x = pos.x.coerceIn(f.left, f.right)
+                                val y = pos.y.coerceIn(f.top, f.bottom)
+                                val cx = (f.left + f.right) / 2f
+                                val cy = (f.top + f.bottom) / 2f
 
-                            // Existing edge: drag it. A simple tap on an edge is
-                            // still treated as a normal "tap anywhere" placement.
-                            if (selectedCorner < 0 && selectedEdge >= 0) {
+                                val target = when {
+                                    x < cx && y < cy -> 0
+                                    x >= cx && y < cy -> 1
+                                    x >= cx && y >= cy -> 2
+                                    else -> 3
+                                }
+
+                                setViewCorner(target, x, y)
+                                for (i in 0..3) snapActive[i] = false
+                                snapHighlight = -1
+                                hint = "Corner moved — tap another page corner or drag to fine-tune."
+                            }
+
+                            if (selectedCorner >= 0) {
                                 val firstDrag = awaitDragOrCancellation(down.id)
                                 if (firstDrag == null) {
-                                    moveCornerToTap(pos.x, pos.y)
+                                    placeCornerAtTap()
+                                } else {
+                                    fun applyCorner(current: Offset) {
+                                        val i = selectedCorner
+                                        val newX = current.x.coerceIn(fit.left, fit.right)
+                                        val newY = current.y.coerceIn(fit.top, fit.bottom)
+                                        val corners = (0..3).map {
+                                            corner(it).x.toDouble() to corner(it).y.toDouble()
+                                        }
+                                        val res = CropGeometry.snapEvaluate(
+                                            corners, i,
+                                            newX.toDouble(), newY.toDouble(),
+                                            snapActive[(i + 3) % 4], snapActive[i]
+                                        )
+                                        setViewCorner(i, res.x.toFloat(), res.y.toFloat())
+                                        snapActive[(i + 3) % 4] = res.prevEdgeSnapped
+                                        snapActive[i] = res.nextEdgeSnapped
+                                        snapHighlight = when {
+                                            res.prevEdgeSnapped -> (i + 3) % 4
+                                            res.nextEdgeSnapped -> i
+                                            else -> -1
+                                        }
+                                    }
+                                    applyCorner(firstDrag.position)
+                                    firstDrag.consume()
+                                    drag(down.id) { change ->
+                                        applyCorner(change.position)
+                                        change.consume()
+                                    }
+                                }
+                                dragCorner = -1
+                                edgeDrag = null
+                                return@awaitEachGesture
+                            }
+
+                            if (selectedEdge >= 0) {
+                                val firstDrag = awaitDragOrCancellation(down.id)
+                                if (firstDrag == null) {
+                                    placeCornerAtTap()
                                 } else {
                                     fun applyEdge(current: Offset) {
                                         val ed = edgeDrag ?: return
@@ -372,12 +428,9 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
                                             current.x, current.y
                                         )
                                         if (res.applied) {
-                                            for (i in 0..3) {
-                                                setViewCorner(i, res.xs[i], res.ys[i])
-                                            }
+                                            for (i in 0..3) setViewCorner(i, res.xs[i], res.ys[i])
                                         }
                                     }
-
                                     applyEdge(firstDrag.position)
                                     firstDrag.consume()
                                     drag(down.id) { change ->
@@ -385,74 +438,23 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
                                         change.consume()
                                     }
                                 }
-
-                                dragCorner = -1
-                                edgeDrag = null
-                                for (i in 0..3) snapActive[i] = false
-                                snapHighlight = -1
-                                return@awaitEachGesture
-                            }
-
-                            // Tap anywhere not on an existing handle = move the
-                            // appropriate corner EXACTLY to the tap. No OpenCV
-                            // search is allowed to reject or relocate this tap.
-                            if (selectedCorner < 0) {
-                                val firstDrag = awaitDragOrCancellation(down.id)
-                                if (firstDrag == null) {
-                                    moveCornerToTap(pos.x, pos.y)
-                                }
                                 dragCorner = -1
                                 edgeDrag = null
                                 return@awaitEachGesture
                             }
 
-                            // Existing corner: drag = manual movement; tap = move
-                            // that corner exactly to the tapped position.
+                            // Anywhere else in the image: tap moves the appropriate
+                            // corner EXACTLY to the tap. No distance-to-current-corner
+                            // check and no detection failure can block it.
                             val firstDrag = awaitDragOrCancellation(down.id)
                             if (firstDrag == null) {
-                                moveCornerToTap(pos.x, pos.y)
-                                dragCorner = -1
-                                edgeDrag = null
-                                for (i in 0..3) snapActive[i] = false
-                                snapHighlight = -1
-                                return@awaitEachGesture
+                                placeCornerAtTap()
                             }
-
-                            fun applyCorner(current: Offset) {
-                                val i = selectedCorner
-                                val newX = current.x.coerceIn(fit.left, fit.right)
-                                val newY = current.y.coerceIn(fit.top, fit.bottom)
-                                val corners = (0..3).map {
-                                    corner(it).x.toDouble() to corner(it).y.toDouble()
-                                }
-                                val res = CropGeometry.snapEvaluate(
-                                    corners, i,
-                                    newX.toDouble(), newY.toDouble(),
-                                    snapActive[(i + 3) % 4], snapActive[i]
-                                )
-                                setViewCorner(i, res.x.toFloat(), res.y.toFloat())
-                                snapActive[(i + 3) % 4] = res.prevEdgeSnapped
-                                snapActive[i] = res.nextEdgeSnapped
-                                snapHighlight = when {
-                                    res.prevEdgeSnapped -> (i + 3) % 4
-                                    res.nextEdgeSnapped -> i
-                                    else -> -1
-                                }
-                            }
-
-                            applyCorner(firstDrag.position)
-                            firstDrag.consume()
-                            drag(down.id) { change ->
-                                applyCorner(change.position)
-                                change.consume()
-                            }
-
                             dragCorner = -1
                             edgeDrag = null
                             for (i in 0..3) snapActive[i] = false
                             snapHighlight = -1
                         }
-}
                     }
             ) {
                 val f = fit
