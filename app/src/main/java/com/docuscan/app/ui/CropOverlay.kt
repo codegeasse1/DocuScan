@@ -107,6 +107,7 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
     var customRatioText by remember { mutableStateOf("1.4142") }
     var customDialog by remember { mutableStateOf(false) }
     var detecting by remember { mutableStateOf(false) }
+    var refiningCorner by remember { mutableStateOf(false) }
     var hint by remember { mutableStateOf<String?>(null) }
     val snapActive = remember { mutableStateListOf(false, false, false, false) }
     var snapHighlight by remember { mutableIntStateOf(-1) }
@@ -183,6 +184,44 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
             norm[i * 2 + 1] = (pts[i].y / rotBitmap.height).coerceIn(0f, 1f)
         }
         hint = "Auto-detected the page edges — fine-tune if needed."
+        return true
+    }
+
+
+    suspend fun refineCornerAtViewPoint(viewX: Float, viewY: Float): Boolean {
+        val f = fit
+        if (f.width <= 1f || f.height <= 1f) return false
+
+        // Convert the tap from the displayed image into original bitmap pixels.
+        val imageX = ((viewX - f.left) / f.width * rotBitmap.width)
+            .coerceIn(0f, rotBitmap.width.toFloat())
+        val imageY = ((viewY - f.top) / f.height * rotBitmap.height)
+            .coerceIn(0f, rotBitmap.height.toFloat())
+
+        refiningCorner = true
+        val refined = withContext(Dispatchers.Default) {
+            runCatching { Cleanup.refineCornerNear(rotBitmap, imageX, imageY) }.getOrNull()
+        }
+        refiningCorner = false
+
+        if (refined == null) return false
+
+        // The tapped point identifies which crop corner the user wants to fix:
+        // use the nearest current crop corner, rather than requiring the overlay
+        // handle itself to be under the finger.
+        var target = 0
+        var best = Float.POSITIVE_INFINITY
+        for (i in 0..3) {
+            val d = (corner(i) - Offset(viewX, viewY)).getDistance()
+            if (d < best) {
+                best = d
+                target = i
+            }
+        }
+
+        norm[target * 2] = (refined.x / rotBitmap.width).coerceIn(0f, 1f)
+        norm[target * 2 + 1] = (refined.y / rotBitmap.height).coerceIn(0f, 1f)
+        hint = "Corner refined — tap another corner if needed, or drag to fine-tune."
         return true
     }
 
@@ -317,7 +356,18 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
 
                             dragCorner = selectedCorner
 
+                            // A simple tap anywhere on the image is also meaningful:
+                            // it becomes a "guided corner correction". This lets the user
+                            // tap the real paper corner even when auto-detection is off by
+                            // several dozen pixels.
+                            //
+                            // If the tap is on an existing handle/edge, dragging still has
+                            // priority and behaves exactly as before.
                             if (selectedCorner < 0 && selectedEdge < 0) {
+                                val firstDrag = awaitDragOrCancellation(down.id)
+                                if (firstDrag == null) {
+                                    scope.launch { refineCornerAtViewPoint(pos.x, pos.y) }
+                                }
                                 return@awaitEachGesture
                             }
 
@@ -454,7 +504,7 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
                 }
             }
 
-            if (detecting) {
+            if (detecting || refiningCorner) {
                 Surface(
                     modifier = Modifier.align(Alignment.Center),
                     shape = RoundedCornerShape(16.dp),
@@ -467,7 +517,7 @@ fun CropOverlay(bitmap: Bitmap, onApply: (Bitmap) -> Unit, onCancel: () -> Unit)
                     ) {
                         CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
                         Spacer(Modifier.width(8.dp))
-                        Text("Detecting edges…", style = MaterialTheme.typography.labelMedium)
+                        Text(if (detecting) "Detecting edges…" else "Refining corner…", style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
