@@ -379,13 +379,14 @@ object Cleanup {
                                     // top/left edge.
                                     if (edgeSupport < 0.30 || parallelism < 0.45) continue
 
+                                    // Prefer a complete, large page over a partial rectangle.
                                     val score =
-                                        areaNorm * 0.34 +
-                                        rectangularity * 0.18 +
-                                        edgeSupport * 0.30 +
-                                        parallelism * 0.10 +
-                                        frameContact * 0.05 +
-                                        centerScore * 0.03
+                                        areaNorm * 0.48 +
+                                        rectangularity * 0.16 +
+                                        edgeSupport * 0.22 +
+                                        parallelism * 0.09 +
+                                        frameContact * 0.03 +
+                                        centerScore * 0.02
 
                                     if (score > bestScore) {
                                         bestScore = score
@@ -686,127 +687,112 @@ object Cleanup {
      * detection, this combines local Canny/Hough line intersections with
      * sub-pixel corners, so a weak paper corner can still be recovered.
      */
-    fun refineCornerNear(src: Bitmap, tapX: Float, tapY: Float, radiusPx: Float = 260f): PointF? {
+    fun refineCornerNear(src: Bitmap, tapX: Float, tapY: Float, radiusPx: Float = 520f): PointF? {
         if (!ensureLoaded()) return null
         if (tapX !in 0f..src.width.toFloat() || tapY !in 0f..src.height.toFloat()) return null
 
-        val rgba = Mat()
-        val gray = Mat()
-        val roi = Mat()
-        val edges = Mat()
-        val lines = Mat()
+        val rgba=Mat(); val gray=Mat(); val roi=Mat(); val edges=Mat(); val lines=Mat()
         try {
             Utils.bitmapToMat(src, rgba)
             Imgproc.cvtColor(rgba, gray, Imgproc.COLOR_RGBA2GRAY)
 
-            val radius = radiusPx.coerceIn(80f, 420f)
-            val left = max(0, (tapX - radius).toInt())
-            val top = max(0, (tapY - radius).toInt())
-            val right = min(gray.cols(), (tapX + radius).toInt() + 1)
-            val bottom = min(gray.rows(), (tapY + radius).toInt() + 1)
-            if (right - left < 48 || bottom - top < 48) return null
+            val maxRadius=max(src.width,src.height)*0.32f
+            val radius=radiusPx.coerceIn(140f,720f).coerceAtMost(maxRadius.coerceAtLeast(140f))
+            val left=max(0,(tapX-radius).toInt())
+            val top=max(0,(tapY-radius).toInt())
+            val right=min(gray.cols(),(tapX+radius).toInt()+1)
+            val bottom=min(gray.rows(),(tapY+radius).toInt()+1)
+            if(right-left<48||bottom-top<48)return null
 
-            gray.submat(top, bottom, left, right).copyTo(roi)
-            Imgproc.GaussianBlur(roi, roi, Size(3.0, 3.0), 0.0)
-            Imgproc.Canny(roi, edges, 35.0, 120.0)
+            gray.submat(top,bottom,left,right).copyTo(roi)
+            Imgproc.GaussianBlur(roi,roi,Size(3.0,3.0),0.0)
 
-            // Close tiny gaps in the paper boundary before Hough detection.
-            val k = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0))
-            Imgproc.morphologyEx(edges, edges, Imgproc.MORPH_CLOSE, k)
-            k.release()
-
-            val minLine = max(18, min(roi.cols(), roi.rows()) / 7)
-            Imgproc.HoughLinesP(
-                edges, lines, 1.0, Math.PI / 180.0,
-                max(18, minLine / 2), minLine.toDouble(), 12.0
-            )
-
-            data class L(val x1: Double, val y1: Double, val x2: Double, val y2: Double, val angle: Double, val len: Double)
-            val hs = mutableListOf<L>()
-            val vs = mutableListOf<L>()
-            for (i in 0 until lines.rows()) {
-                val v = lines.get(i, 0)
-                val dx = v[2] - v[0]
-                val dy = v[3] - v[1]
-                val len = Math.hypot(dx, dy)
-                if (len < minLine) continue
-                var a = Math.toDegrees(atan2(dy, dx))
-                a = ((a % 180.0) + 180.0) % 180.0
-                val l = L(v[0], v[1], v[2], v[3], a, len)
-                when {
-                    a < 28.0 || a > 152.0 -> hs.add(l)
-                    a > 62.0 && a < 118.0 -> vs.add(l)
-                }
-            }
-
-            fun intersect(a: L, b: L): Point? {
-                val den = (a.x1-a.x2)*(b.y1-b.y2) - (a.y1-a.y2)*(b.x1-b.x2)
-                if (abs(den) < 1e-8) return null
-                val t = ((a.x1-b.x1)*(b.y1-b.y2) - (a.y1-b.y1)*(b.x1-b.x2)) / den
-                return Point(a.x1+t*(a.x2-a.x1), a.y1+t*(a.y2-a.y1))
-            }
-
-            var best: Point? = null
-            var bestScore = Double.POSITIVE_INFINITY
-            val tapLocalX = tapX - left
-            val tapLocalY = tapY - top
-
-            // Prefer intersections close to the tap, but only when both lines
-            // extend toward the intersection. This avoids unrelated text boxes.
-            for (h in hs) for (v in vs) {
-                val p = intersect(h, v) ?: continue
-                if (p.x < -24 || p.x > roi.cols()+24 || p.y < -24 || p.y > roi.rows()+24) continue
-                val dist = Math.hypot(p.x - tapLocalX, p.y - tapLocalY)
-                if (dist > radius * 0.72) continue
-
-                fun extensionPenalty(l: L): Double {
-                    fun d(x: Double, y: Double): Double {
-                        val cross = abs((x-l.x1)*(l.y2-l.y1) - (y-l.y1)*(l.x2-l.x1))
-                        return cross / (l.len + 1e-6)
-                    }
-                    return min(80.0, d(p.x,p.y))
-                }
-                val score = dist + extensionPenalty(h) + extensionPenalty(v)
-                    - min(50.0, (h.len + v.len) * 0.08)
-                if (score < bestScore) {
-                    bestScore = score
-                    best = Point(p.x + left, p.y + top)
-                }
-            }
-
-            // Fallback: Shi-Tomasi + sub-pixel refinement.
-            if (best == null) {
-                val corners = MatOfPoint()
+            val canny=Mat()
+            try {
+                Imgproc.Canny(roi,canny,18.0,75.0)
+                val adaptive=Mat()
                 try {
-                    Imgproc.goodFeaturesToTrack(roi, corners, 64, 0.003, 6.0, Mat(), 7, true, 0.04)
-                    if (!corners.empty()) {
-                        val p2 = MatOfPoint2f(*corners.toArray().map { Point(it.x,it.y) }.toTypedArray())
+                    edgesAdaptive(roi,adaptive)
+                    Core.bitwise_or(canny,adaptive,edges)
+                } finally { adaptive.release() }
+            } finally { canny.release() }
+
+            val k=Imgproc.getStructuringElement(Imgproc.MORPH_RECT,Size(5.0,5.0))
+            Imgproc.morphologyEx(edges,edges,Imgproc.MORPH_CLOSE,k); k.release()
+
+            val minLine=max(16,min(roi.cols(),roi.rows())/12)
+            Imgproc.HoughLinesP(edges,lines,1.0,Math.PI/180.0,max(10,minLine/2),minLine.toDouble(),14.0)
+
+            data class L(val x1:Double,val y1:Double,val x2:Double,val y2:Double,val angle:Double,val len:Double)
+            val all=mutableListOf<L>()
+            for(i in 0 until lines.rows()){
+                val v=lines.get(i,0); val dx=v[2]-v[0]; val dy=v[3]-v[1]
+                val len=Math.hypot(dx,dy); if(len<minLine)continue
+                var a=Math.toDegrees(atan2(dy,dx)); a=((a%180.0)+180.0)%180.0
+                all.add(L(v[0],v[1],v[2],v[3],a,len))
+            }
+
+            fun angleDelta(a:Double,b:Double):Double {
+                var d=abs(a-b); if(d>90.0)d=180.0-d; return d
+            }
+            fun intersect(a:L,b:L):Point? {
+                val den=(a.x1-a.x2)*(b.y1-b.y2)-(a.y1-a.y2)*(b.x1-b.x2)
+                if(abs(den)<1e-8)return null
+                val t=((a.x1-b.x1)*(b.y1-b.y2)-(a.y1-b.y1)*(b.x1-b.x2))/den
+                return Point(a.x1+t*(a.x2-a.x1),a.y1+t*(a.y2-a.y1))
+            }
+            fun lineDistance(p:Point,l:L):Double {
+                val cross=abs((p.x-l.x1)*(l.y2-l.y1)-(p.y-l.y1)*(l.x2-l.x1))
+                return cross/(l.len+1e-6)
+            }
+            fun extensionPenalty(p:Point,l:L):Double {
+                val dx=l.x2-l.x1; val dy=l.y2-l.y1; val len2=dx*dx+dy*dy
+                if(len2<1e-8)return 100.0
+                val t=((p.x-l.x1)*dx+(p.y-l.y1)*dy)/len2
+                return when { t<0.0->min(100.0,-t*l.len); t>1.0->min(100.0,(t-1.0)*l.len); else->0.0 }
+            }
+
+            var best:Point?=null; var bestScore=Double.POSITIVE_INFINITY
+            val tapLocalX=tapX-left; val tapLocalY=tapY-top
+
+            for(i in 0 until all.size) {
+                val a=all[i]
+                for(j in i+1 until all.size) {
+                    val b=all[j]
+                    val delta=angleDelta(a.angle,b.angle)
+                    if(delta<50.0||delta>90.0)continue
+                    val p=intersect(a,b)?:continue
+                    if(p.x<-40||p.x>roi.cols()+40||p.y<-40||p.y>roi.rows()+40)continue
+                    val dist=Math.hypot(p.x-tapLocalX,p.y-tapLocalY)
+                    if(dist>radius*0.80)continue
+                    val lineError=lineDistance(p,a)+lineDistance(p,b)
+                    val extension=extensionPenalty(p,a)+extensionPenalty(p,b)
+                    val lengthBonus=min(80.0,(a.len+b.len)*0.10)
+                    val score=dist+lineError*2.0+extension*0.75-lengthBonus
+                    if(score<bestScore){bestScore=score;best=Point(p.x+left,p.y+top)}
+                }
+            }
+
+            if(best==null) {
+                val corners=MatOfPoint()
+                try {
+                    Imgproc.goodFeaturesToTrack(roi,corners,160,0.0015,5.0,Mat(),7,true,0.02)
+                    if(!corners.empty()) {
+                        val p2=MatOfPoint2f(*corners.toArray().map{Point(it.x,it.y)}.toTypedArray())
                         try {
-                            Imgproc.cornerSubPix(
-                                roi, p2, Size(5.0,5.0), Size(-1.0,-1.0),
-                                org.opencv.core.TermCriteria(
-                                    org.opencv.core.TermCriteria.EPS + org.opencv.core.TermCriteria.MAX_ITER,
-                                    40, 0.01
-                                )
-                            )
-                            for (p in p2.toArray()) {
-                                val d = Math.hypot(p.x-tapLocalX, p.y-tapLocalY)
-                                if (d < bestScore && d <= radius * 0.72) {
-                                    bestScore = d
-                                    best = Point(p.x+left, p.y+top)
-                                }
+                            Imgproc.cornerSubPix(roi,p2,Size(7.0,7.0),Size(-1.0,-1.0),
+                                org.opencv.core.TermCriteria(org.opencv.core.TermCriteria.EPS+org.opencv.core.TermCriteria.MAX_ITER,50,0.01))
+                            for(p in p2.toArray()){
+                                val d=Math.hypot(p.x-tapLocalX,p.y-tapLocalY)
+                                if(d<=radius*0.80&&d<bestScore){bestScore=d;best=Point(p.x+left,p.y+top)}
                             }
                         } finally { p2.release() }
                     }
                 } finally { corners.release() }
             }
-
-            return best?.let { PointF(it.x.toFloat(), it.y.toFloat()) }
-        } catch (_: Throwable) {
-            return null
-        } finally {
-            rgba.release(); gray.release(); roi.release(); edges.release(); lines.release()
-        }
+            return best?.let{PointF(it.x.toFloat(),it.y.toFloat())}
+        } catch(_:Throwable){ return null }
+        finally { rgba.release();gray.release();roi.release();edges.release();lines.release() }
     }
 
     private fun isLowLight(rgba: Mat): Boolean {
