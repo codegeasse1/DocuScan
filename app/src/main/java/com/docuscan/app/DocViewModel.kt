@@ -67,6 +67,14 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
     var returnToEditor by mutableStateOf(false)
         private set
 
+    /** Camera preference that lasts only while this app process is alive. */
+    var cameraPreferredForSession by mutableStateOf(false)
+        private set
+
+    /** The next captured camera page should open directly in the crop editor. */
+    var autoCropNextPage by mutableStateOf(false)
+        private set
+
     /** Update-check state, driven by the UI (which owns the coroutine scope). */
     var latestUpdate by mutableStateOf<UpdateInfo?>(null)
         private set
@@ -90,9 +98,18 @@ class DocViewModel(app: Application) : AndroidViewModel(app) {
         screen = Screen.Tabs
     }
 
-    fun openCamera(fromEditor: Boolean) {
+    fun openCamera(fromEditor: Boolean, autoCrop: Boolean = false) {
         returnToEditor = fromEditor
+        autoCropNextPage = autoCrop
         screen = Screen.Camera
+    }
+
+    fun updateCameraPreferredForSession(enabled: Boolean) {
+        cameraPreferredForSession = enabled
+    }
+
+    fun consumeAutoCropNextPage() {
+        autoCropNextPage = false
     }
 
     fun closeCamera() {
